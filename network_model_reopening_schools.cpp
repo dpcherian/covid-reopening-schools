@@ -48,7 +48,8 @@ int randint(int b) // Generate a uniform random number in [0, b)
 
 /* Global variables *******************************************/
 
-double dt = 0.01;
+double dt = 0.1;
+char output_folder[100] = "data";
 
 const int mult = 1;              // Multiplier to scale up problem (1: n_pop = 1 x 10,000, 2: n_pop = 20,000, etc.)
 
@@ -66,8 +67,9 @@ const int classrooms = 100;       // Number of classrooms per school
 int n_asym = 0;//mult*100;            // Initial number of asymptomatics
 int n_rec  = 0;//mult*3000;            // Initial number of asymptomatics
 
-double initial_asymptomatic_fraction = 1/100;
-double initial_recovered_fraction    = 30/100;
+double initial_asymptomatic_fraction = 1.00/100;
+double initial_recovered_fraction    = 30.0/100;
+double initial_vaccinated_fraction   = 20.0/100;
 
 const int maxppl = 10000;        // Maximum number of people who can be linked to a location (to avoid 2GB limit on arrays) [Not needed anymore]
 
@@ -119,7 +121,7 @@ int days_bw_hq_tests = 0;
 int days_bw_lq_tests = 0;
 
 double rate[max_age][n_states][n_states] = {};
-double age_factor[max_age][n_states] = {};
+// double age_factor[max_age][n_states] = {};
 
 int pop[n_pop][person_attr] = { };
 int n_per_location[n_loc][n_states];
@@ -131,10 +133,15 @@ vector<vector<vector<int>>> n_per_room(n_loc);
 bool is_school[n_loc] = {};
 int n_rooms[n_loc] = {};
 
+
+// New vaccination arrays
+bool is_vaccinated[n_pop] = {};
+int vaccinated_on[n_pop] = {};
 int vaccs_per_state[n_states] = {}; // NEW: Remove quick?
+int vaccines_administered = 0;
+int agewise_vaccines_administered[max_age] = {};
 
 int current_room[n_pop] = {};
-int assigned_classroom[n_pop]={}; // Remove this
 int assigned_room[n_pop]={};
 bool is_adult[n_pop]={};
 
@@ -147,7 +154,7 @@ double transmission_reduction    = 0.4;
 int vaccination_strategy = 0;
 int ascending = 1;
 int descending=-1;
-int vaccines_administered = 0;
+// int vaccines_administered = 0;
 
 double unlockSchoolsAt = 100;
 double dvr = 0.0;
@@ -248,7 +255,7 @@ if (fp==NULL) {printf("no such file\n");exit(0);}
 
 char *buffer,*tofree,*value;
 
-int row = -1;
+int row   = -1;    // Initial row is -1, to ignore the headers
 int column = 0;
 
 while (row<n_pop)
@@ -265,7 +272,8 @@ while (row<n_pop)
 		{
       pop[row][column] = atoi(value);
       if(column==a){pop[row][column] = (int)pop[row][column]/10;} // If the column is the age, divide it by 10 to get to the decade
-      if(column==s){
+
+      if(column==s){                                              // Setting initial states
         double r = uniform();
         if(r<initial_asymptomatic_fraction){pop[row][column] = A; n_asym++;}
         else if(r>initial_asymptomatic_fraction && r<initial_asymptomatic_fraction+initial_recovered_fraction){ pop[row][column]=R; n_rec++;}
@@ -275,24 +283,27 @@ while (row<n_pop)
 		column++;
 		}
 
+    is_vaccinated[row] = (uniform()<initial_vaccinated_fraction) ? true : false;
+    vaccinated_on[row] = is_vaccinated[row] ? -1000 : 1000;
+    if(is_vaccinated[row]){
+      vaccs_per_state[pop[row][s]]++;
+      agewise_vaccines_administered[pop[row][a]]++;
+      vaccines_administered++;
+    }
+
     n_per_location[pop[row][c]][pop[row][s]] += 1;  // Increment number of disease-state in current location
-    n_per_age[pop[row][a]][pop[row][s]]      += 1;  // Increment number of disease state per age
-    //
+    n_per_age     [pop[row][a]][pop[row][s]] += 1;  // Increment number of disease state per age
+
     if(pop[row][a]>1){is_adult[row] = true;}
-    //
+
     int work_loc    = pop[row][w];
     int current_loc = pop[row][c];
-    //
+
     assigned_room[row] = randint(n_rooms[work_loc]);
     current_room[row]  = 0;
-    printf("loc %i rooms %i assigned %i\n",work_loc, n_rooms[work_loc], assigned_room[row] );
-
-    // printf("Stuff %i %i %i\n", current_loc, current_room[row], pop[row][c]);
+    // printf("loc %i rooms %i assigned %i\n",work_loc, n_rooms[work_loc], assigned_room[row] );
 
     n_per_room[current_loc][current_room[row]][pop[row][s]] += 1; // Increase number of current state in current room of current location
-
-
-
 
 	row++;
 
@@ -324,20 +335,26 @@ for(int i=0;i<n_loc;i++){
 //***** CREATE n ARRAY *************************************//
 
   n[S] = n_pop-n_asym-n_rec;
+  n[E] = 0;
   n[A] = n_asym;
   n[P] = 0;
   n[MI]= 0;
   n[SI]= 0;
   n[R] = n_rec;
   n[H] = 0;
+  n[D] = 0;
 
 //********* DONE CREATING n ARRAY **************************//
 
 }
 
 
-void createPopulation(){
+void createPopulation(char *filename){
 
+  // Reset arrays and some variables, and load population from csv file
+  n_asym = 0;
+  n_rec  = 0;
+  vaccines_administered = 0;
 
   // *************************************************//
   // *************** LOCATION SETUP ******************//
@@ -345,6 +362,7 @@ void createPopulation(){
 
   // Assign rooms to each location, and initialise the n_per_room vector.
   // Create a people_linked_to list of all people associated with a location (either as work or home).
+  // Reset all classroom numbers
 
   for(int i=0; i<n_loc;i++){
 
@@ -367,27 +385,6 @@ void createPopulation(){
     }
   }
 
-  for(int i=0; i<n_loc;i++){
-    for(int j=0; j<n_rooms[i]; j++){
-      for(int k=0; k<n_states;k++){
-        printf("%i ",n_per_room[i][j][k]);
-      }
-      printf("\n");
-    }
-    printf("Row %i complete *******\n", i);
-  }
-
-
-  // for(int i=0;i<n_pop;i++){ // Loop over all people
-  //   if(pop[i][w]<start_schools+n_schools && pop[i][w]>=start_schools){
-  //     int loc = pop[i][w];
-  //
-  //     assigned_classroom[i] = randint(n_rooms[loc]);
-  //     // printf("loc %i rooms %i assigned %i\n",loc, n_rooms[loc], assigned_classroom[i] );
-  //   }
-  //   else{assigned_classroom[i]=-1;}
-  // }
-
 
   // *************************************************//
   // ****************** AGE SETUP ********************//
@@ -403,161 +400,25 @@ void createPopulation(){
 
   // Todo: Read from CSV here
 
-  // // Create persons, assign them to susceptible
-  // for (int i=0; i<n_pop;i++){
-  //   int home = randint(n_overlap-1, n_loc);  // Assign random homes per person from [n_overlap-1,n_loc)
-  //   // create_person(pop[i], S, home);          // Assign everyone to S=0
-  //
-  //   n_per_location[pop[i][c]][S] += 1;       // Increase number of S in current location
-  //   n_per_age[pop[i][a]][S] += 1;
-  //
-  //   if(pop[i][a]>0){is_adult[i] = true;}
-  //
-  //   int work_loc    = pop[i][w];
-  //   int current_loc = pop[i][c];
-  //
-  //   assigned_room[i] = randint(n_rooms[work_loc]);
-  //   current_room[i]  = 0;
-  //   // printf("loc %i rooms %i assigned %i\n",work_loc, n_rooms[work_loc], assigned_room[i] );
-  //
-  //   n_per_room[current_loc][current_room[i]][S] += 1; // Increase number of S in current room of current location
-  //
-  //
-  // }
-// ****************** SET INITIAL BACKGROUND SEROPOSITIVITY ********************//
+  readcsv(filename);
 
-  // // Create list of people to be set as asymptomatics
-  // int temp_rec[n_rec] = {};
-  //
-  // int random_person = 0;
-  //
-  // for (int i = 0; i<n_rec;i++){
-  //   bool flag = false;
-  //   while(flag==false){
-  //     random_person = randint(n_pop);
-  //     flag = true;
-  //
-  //     for(int j=0; j<n_rec; j++){
-  //       if(temp_rec[j] == random_person){
-  //         flag = false; break;
-  //       }
-  //     }
+
+  // *************************************************//
+  // **************** PRINT POPULATION ***************//
+  // *************************************************//
+
+  // for(int i=0; i<n_pop;i++){
+  //   for(int j=0;j<person_attr;j++){
+  //     printf("%i,", pop[i][j]);
   //   }
-  //   temp_rec[i] = random_person;
+  //   printf("\n");
   // }
-  //
-  // // Set those people to be recovered
-  // for(int i=0; i<n_rec;i++){
-  //
-  //   int person = temp_rec[i];
-  //   int current_loc = pop[person][c];
-  //   int age = pop[person][a];
-  //
-  //   pop[ person ][s] = R;                             // Set their state to R
-  //
-  //   n_per_location[ current_loc ][S] -= 1; // Reduce number of susceptibles
-  //                                          // in temp_person's current locations
-  //   n_per_location[ current_loc ][R] += 1; // Increase number of recovered
-  //                                          // in temp_person's current locations
-  //   n_per_age[ age ][S] -= 1;
-  //   n_per_age[ age ][R] += 1;
-  //
-  //   n_per_room[ current_loc ][ current_room[person] ][S] -= 1; // Reduce number of S in current room of current location
-  //   n_per_room[ current_loc ][ current_room[person] ][R] += 1; // Increase number of A in current room of current location
-  // }
-
-
-  // ****************** SET INITIAL INFECTION SEED ********************//
-
-  // // Create list of people to be set as asymptomatics
-  // int temp_people[n_asym] = {};
-  //
-  // random_person = 0;
-  //
-  // for (int i = 0; i<n_asym;i++){
-  //   bool flag = false;
-  //   while(flag==false){
-  //     random_person = randint(n_pop);
-  //     flag = true;
-  //
-  //     for(int j=0; j<n_asym; j++){
-  //       if(temp_people[j] == random_person){
-  //         flag = false; break;
-  //       }
-  //     }
-  //   }
-  //   temp_people[i] = random_person;
-  // }
-  //
-  // // Set those people to be asymptomatics
-  // for(int i=0; i<n_asym;i++){
-  //
-  //   int person = temp_people[i];
-  //   int current_loc = pop[person][c];
-  //   int age = pop[person][a];
-  //
-  //   pop[ person ][s] = A;                             // Set their state to A
-  //
-  //   n_per_location[ current_loc ][S] -= 1; // Reduce number of susceptibles
-  //                                          // in temp_person's current locations
-  //   n_per_location[ current_loc ][A] += 1; // Increase number of asymptomatics
-  //                                          // in temp_person's current locations
-  //   n_per_age[ age ][S] -= 1;
-  //   n_per_age[ age ][A] += 1;
-  //
-  //   n_per_room[ current_loc ][ current_room[person] ][S] -= 1; // Reduce number of S in current room of current location
-  //   n_per_room[ current_loc ][ current_room[person] ][A] += 1; // Increase number of A in current room of current location
-  // }
-
-
-
-
-
-
-    // for(int i=start_schools; i<start_schools+n_schools;i++){    // Reset all the classrooms.
-    //   int school = i-start_schools;
-    //   for(int j=0;j<n_rooms[i];j++){
-    //     for(int k=0;k<n_states;k++){n_per_classroom[school][j][k]=0;}
-    //   }
-    // }
-
-    // *************************************************//
-    // **************** PRINT POPULATION ***************//
-    // *************************************************//
-
-    // for(int i=0; i<n_pop;i++){
-    //   for(int j=0;j<person_attr;j++){
-    //     printf("%i,", pop[i][j]);
-    //   }
-    //   printf("\n");
-    // }
-    // exit(2);
+  // exit(2);
 
 }
 
 
-int main(void)
-{
-char filename[1000]="synthetic_population.csv";
-int i,j;
-for(int tmp=0;tmp<10;tmp++){printf("%s\n","Blank");}
-createPopulation();
-readcsv(filename);
-
-// just checking that it read the last 10 rows correctly
-for (i=0;i<n_pop;i++)
-	{
-	for (j=0;j<person_attr;j++) printf("%d ",pop[i][j]);
-	printf("\n");
-	}
-
-}
-
-
-
-// char names[][26] = {"NoVaccination_LockSchools","NoVaccination","Vaccinating0", "Vaccinating1","Vaccinating2"};
-char names[][26] = {"output","","","",""};
-char outputFilename[210];
+char outputFilename[1000];
 void writetofile(int output[][op_width], int age_output[][(n_states+1)*max_age + 1], int tf, double Tpars[2][4], double begin_at, double test_frac, double time_taken, int details[9],int iter){
   // FOR REFERENCE: int details[] = {quarantine_confined, lock_homes, quarantine_when_sample_taken, lq_tests_conducted, hq_tests_conducted, tests_conducted, results_declared, locations_moved, hcw_recovered};
   // Write output to a FILE
@@ -567,9 +428,9 @@ void writetofile(int output[][op_width], int age_output[][(n_states+1)*max_age +
   double rn1 = uniform();
   double rn2 = uniform();
 
-  printf("./%s/Vaccination_rate_%g_%s_UnlockSchoolsAt_%g_%lf%lf-%i.txt",names[iter],dvr,vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset",unlockSchoolsAt,rn1,rn2,iter);
+  // printf("./%s/VR_%g_%s_UnlockSchoolsAt_%g_%lf%lf-%i.txt",output_folder,dvr,vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset",unlockSchoolsAt,rn1,rn2,iter);
 
-  sprintf(outputFilename,"./%s/Vaccination_rate_%g_%s_UnlockSchoolsAt_%g_%lf%lf-%i.txt",names[iter],dvr,vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset",unlockSchoolsAt,rn1,rn2,iter);
+  sprintf(outputFilename,"./%s/Total_IR_%g_IV_%g_VR_%g_%s_UnlockSchoolsAt_%g_%lf%lf-%i.txt",output_folder,initial_recovered_fraction*100, initial_vaccinated_fraction*100, dvr,vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset",unlockSchoolsAt,rn1,rn2,iter);
   FILE *fpt=(FILE *)fopen(outputFilename,"wt"); // Open the file to print output
 
   if(fpt){
@@ -603,7 +464,7 @@ void writetofile(int output[][op_width], int age_output[][(n_states+1)*max_age +
     for(int i=0; i<n_states;i++){fprintf(fpt,"# ");for(int j=0; j<n_states;j++){fprintf(fpt,"%5g ", rate[0][i][j]);}fprintf(fpt,"\n");}// NOTE! : Change to correct rates
     fprintf(fpt,"###### END LOG #####################\n");
     fprintf(fpt,"#\n");
-    fprintf(fpt, "# %s %s %s %s %s %s %s %s %s %s %s %s %s %s\n","Day","nS","nA","nP","nMI","nSI","nR","nH","PCR_conducted_today", "RAT_conducted_today", "Tests_remaining_today", "Agents_currently_confined", "Quarantines_removed_today","Locations_in_quarantine_today" );
+    fprintf(fpt, "# %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s\n","Day","nS","nE","nA","nP","nMI","nSI","nR","nH","nD","PCR_conducted_today", "RAT_conducted_today", "Tests_remaining_today", "Agents_currently_confined", "Quarantines_removed_today","Locations_in_quarantine_today" );
 
     for(int i=0;i<tf;i++){
       for(int j=0; j<op_width;j++){
@@ -618,10 +479,10 @@ void writetofile(int output[][op_width], int age_output[][(n_states+1)*max_age +
   else{printf("File error, %d\n",errno);}
 
   errno = 0;      // Variable to store error number in case file open does not work
-  char ageOutputFilename[210];
+  char ageOutputFilename[1000];
 
   // sprintf(ageOutputFilename,"./%s/output/AgeStratified_BeginAt_%g_DTR_%g_RAT_%g_%g_PCR_%g_%g_%lf%lf-%i.txt",names[iter],begin_at,test_frac,Tpars[0][0],Tpars[0][3],Tpars[1][0],Tpars[1][3],uniform(),uniform(),iter);
-  sprintf(ageOutputFilename,"./%s/AgeStratified_Vaccination_rate_%g_%s_UnlockSchoolsAt_%g_%lf%lf-%i.txt",names[iter],dvr,vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset",unlockSchoolsAt,rn1,rn2,iter);
+  sprintf(ageOutputFilename,"./%s/AgeStratified_IR_%g_IV_%g_VR_%g_%s_UnlockSchoolsAt_%g_%lf%lf-%i.txt",output_folder,initial_recovered_fraction*100, initial_vaccinated_fraction*100, dvr,vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset",unlockSchoolsAt,rn1,rn2,iter);
   FILE *fpt1=(FILE *)fopen(ageOutputFilename,"wt"); // Open the file to print output
 
   if(fpt){
@@ -691,10 +552,6 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
   bool being_tested[n_pop] = {};
   bool loc_confined[n_loc] = {};
 
-  // New vaccination arrays
-  bool is_vaccinated[n_pop] = {};
-  int vaccinated_on[n_pop] = {};
-
   // New school array
   // bool is_school[n_loc] = {};
   // for(int i=start_schools;i<start_schools+n_schools;i++){is_school[i]=true;}
@@ -759,21 +616,21 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
 
   bool lock_schools = true; //NEW: Start with schools always locked!
 
-  vaccines_administered = 0;
-  int agewise_vaccines_administered[max_age] = {};
-
   int output[tf+1][op_width];   // Output array, to be printed to file
   int age_output[tf+1][(n_states+1)*max_age + 1]; // NEW: to print out output per age
 
   // First line of output
-  output[day][0] = day; for(int q=0;q<n_states;q++){output[day][q+1]=n[q];} output[day][n_states+1]=hq_tests_conducted;output[day][n_states+2]=lq_tests_conducted;output[day][n_states+3]=tests_remaining_today;output[day][n_states+4]=0;output[day][n_states+5]=0;output[day][n_states+6]=0;output[day][n_states+7]=0;
+  output[day][0] = day; for(int q=0;q<n_states;q++){output[day][q+1]=n[q];}
+  output[day][n_states+1] = vaccines_administered;
+  output[day][n_states+2]=hq_tests_conducted;output[day][n_states+3]=lq_tests_conducted;output[day][n_states+4]=tests_remaining_today;output[day][n_states+5]=0;output[day][n_states+6]=0;output[day][n_states+7]=0;
+
   age_output[day][0] = day; int counter = 1; for(int r=0;r<max_age;r++){for(int q=0;q<n_states;q++){age_output[day][counter]=n_per_age[r][q];counter++;} age_output[day][counter]=agewise_vaccines_administered[r];counter++;}
 
   double exit_rate[n_states] = {};
 
   while(t<tf){
 
-    if(vaccines_administered >= unlockSchoolsAt*n_pop/100 && lock_schools==true){  // Check if schools need to be unlocked
+    if(t>unlockSchoolsAt && lock_schools==true){  // Check if schools need to be unlocked
       lock_schools=false;
       printf("Schools unlocked at t=%.2f\n",t);
     }
@@ -785,7 +642,7 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
 
       for(int i=0;i<n_pop;i++){
 
-        if(pop[i][s]!=H && is_confined[i] == false && loc_confined[pop[i][c]]==false){
+        if(pop[i][s]!=H && pop[i][s]!=D && is_confined[i] == false && loc_confined[pop[i][c]]==false){
           locations_moved++;
           int home_loc = pop[i][h];
           int work_loc = pop[i][w];
@@ -914,12 +771,12 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
 
         for(int j = 0; j<N;j++){      // Go over people in this room
             int p = ind[j];           // index of person
-            if(quarantine_confined == true && is_confined[p] == true)     {conf_by_state_in_room[pop[p][s]]++; tot_conf++; } // If the person is confined, increment the conf_by_state_in_loc of their state
+            if(quarantine_confined == true && is_confined[p] == true) {conf_by_state_in_room[pop[p][s]]++; tot_conf++; } // If the person is confined, increment the conf_by_state_in_loc of their state
             else if(is_vaccinated[p]==true){vacc_by_state_in_room[pop[p][s]]++; tot_vacc++; }
         }
 
 
-        if(loc_confined[i]==true && conf_by_state_in_loc[S]+conf_by_state_in_loc[A]+conf_by_state_in_loc[P]+conf_by_state_in_loc[MI]+conf_by_state_in_loc[SI]+conf_by_state_in_loc[R]+conf_by_state_in_loc[H] == 0){loc_confined[i]=false;loc_confined_time[i]=-1000;} // Unlock the house if there are no confined people
+        if(loc_confined[i]==true && conf_by_state_in_loc[S]+conf_by_state_in_loc[E]+conf_by_state_in_loc[A]+conf_by_state_in_loc[P]+conf_by_state_in_loc[MI]+conf_by_state_in_loc[SI]+conf_by_state_in_loc[R]+conf_by_state_in_loc[H] == 0){loc_confined[i]=false;loc_confined_time[i]=-1000;} // Unlock the house if there are no confined people
 
         shuffle(0,N,ind); // Shuffle list of people currently in locations
 
@@ -928,8 +785,8 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
           int age = pop[ind[j]][a];
 
           // NEW : ADDING THE VACCINE MULTIPLIER:
-          double f = rate[age][S][A]/(rate[age][S][A]+rate[age][S][P]);            // default vals: If the person isn't a vaccinated test subject, f is just gamma (beta not reduced)
-          double lambda_S = rate[age][S][A]+rate[age][S][P];
+          double f = rate[age][E][A]/(rate[age][E][A]+rate[age][E][P]);            // default vals: If the person isn't a vaccinated test subject, f is just gamma (beta not reduced)
+          double lambda_E = rate[age][E][A]+rate[age][E][P];
           double beta_multiplier = 1.0;                                            // default beta-multipler (reduction) = 1 unless vaccinated
 
           if(is_vaccinated[ind[j]]){
@@ -938,11 +795,11 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
 
             beta_multiplier = infection_reduction;
 
-            double this_gamma = rate[age][S][A]/(rate[age][S][A]+rate[age][S][P]);
+            double this_gamma = rate[age][E][A]/(rate[age][E][A]+rate[age][E][P]);
 
             //      if(test_subjects[tindex][2] == 1){ f = std::min(this_gamma + (0.8*(1 - this_gamma)/42)*(t - vday),this_gamma + (0.8*(1 - this_gamma)/42)*28);} // first vaccination didn't work perfectly
             // else if(test_subjects[tindex][2] == 2){ f = std::min(this_gamma + (0.8*(1 - this_gamma)/42)*(t - vday),this_gamma + (0.8*(1 - this_gamma)/42)*42);}      // second vaccination worked perfectly
-            int fd = 1;//28;
+            int fd = 90+14;//28;
             f = std::min(this_gamma + (gamma_fractional_increase*(1 - this_gamma)/fd)*(t - vday),this_gamma + (gamma_fractional_increase*(1 - this_gamma)/fd)*fd); // the multipler changes from gamma to this.
 
             //****** To print out gamma for a single vaccinated individual ******//
@@ -952,22 +809,21 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
           }
 
 
-          int newN = n_per_room[i][room][S]+n_per_room[i][room][A]+n_per_room[i][room][P]+n_per_room[i][room][MI]+n_per_room[i][room][SI]+n_per_room[i][room][R]+n_per_room[i][room][H];
+          int newN = n_per_room[i][room][S]+n_per_room[i][room][E]+n_per_room[i][room][A]+n_per_room[i][room][P]+n_per_room[i][room][MI]+n_per_room[i][room][SI]+n_per_room[i][room][R]+n_per_room[i][room][H]+n_per_room[i][room][D];
 
           double V = newN - alphaH*n_per_room[i][room][H];   // Spatial damping parameter (adjusted by alphaH for hospitals)
 
-          r[S][A] = beta_multiplier *    f    * lambda_S * 1/V * (Cpars[0]*(n_per_room[i][room][A] - conf_by_state_in_room[A]*alphaQ - vacc_by_state_in_room[A]*alphaT) +    // SA
-                                                                  Cpars[1]*(n_per_room[i][room][P] - conf_by_state_in_room[P]*alphaQ - vacc_by_state_in_room[P]*alphaT) +    // SP
-                                                                  Cpars[2]*(n_per_room[i][room][MI]-conf_by_state_in_room[MI]*alphaQ - vacc_by_state_in_room[MI]*alphaT) +   // S-MI
-                                                                  Cpars[3]*(n_per_room[i][room][SI]-conf_by_state_in_room[SI]*alphaQ - vacc_by_state_in_room[SI]*alphaT) +   // S-SI
-                                                                  Cpars[4]*n_per_room[i][room][H]);                                                                          // SH
+          // S->E
+          r[S][E] = beta_multiplier * rate[age][S][E] * 1/V * (Cpars[0]*(n_per_room[i][room][A] - conf_by_state_in_room[A]*alphaQ - vacc_by_state_in_room[A]*alphaT) +    // SA
+                                                               Cpars[1]*(n_per_room[i][room][P] - conf_by_state_in_room[P]*alphaQ - vacc_by_state_in_room[P]*alphaT) +    // SP
+                                                               Cpars[2]*(n_per_room[i][room][MI]-conf_by_state_in_room[MI]*alphaQ - vacc_by_state_in_room[MI]*alphaT) +   // S-MI
+                                                               Cpars[3]*(n_per_room[i][room][SI]-conf_by_state_in_room[SI]*alphaQ - vacc_by_state_in_room[SI]*alphaT) +   // S-SI
+                                                               Cpars[4]*n_per_room[i][room][H]);                                                                          // SH
+          // E->A
+          r[E][A] =  f * lambda_E;
 
-          // S->P
-          r[S][P] = beta_multiplier * (1 - f) * lambda_S * 1/V * (Cpars[0]*(n_per_room[i][room][A] - conf_by_state_in_room[A]*alphaQ - vacc_by_state_in_room[A]*alphaT) +    // SA
-                                                                  Cpars[1]*(n_per_room[i][room][P] - conf_by_state_in_room[P]*alphaQ - vacc_by_state_in_room[P]*alphaT) +    // SP
-                                                                  Cpars[2]*(n_per_room[i][room][MI]-conf_by_state_in_room[MI]*alphaQ - vacc_by_state_in_room[MI]*alphaT) +   // S-MI
-                                                                  Cpars[3]*(n_per_room[i][room][SI]-conf_by_state_in_room[SI]*alphaQ - vacc_by_state_in_room[SI]*alphaT) +   // S-SI
-                                                                  Cpars[4]*n_per_room[i][room][H]);                                                                          // SH
+          // E->P
+          r[E][P] = (1 - f) * lambda_E;
 
           // A->R
           r[A][R] = rate[age][A][R];
@@ -982,18 +838,34 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
           // SI->H
           r[SI][H] = rate[age][SI][H];
           // H->R
-          r[H][R] = rate[age][H][R] ;
+          r[H][R] = rate[age][H][R];
+          // H->D
+          r[H][D] = rate[age][H][D];
 
-
-          exit_rate[S] = r[S][A] + r[S][P];
+          // printf("S->E %lf\n",r[S][E] );
+          exit_rate[S] = r[S][E];
+          exit_rate[E] = r[E][A] + r[E][P];
           exit_rate[A] = r[A][R];
           exit_rate[P] = r[P][MI] + r[P][SI];
           exit_rate[MI]= r[MI][R];
           exit_rate[SI]= r[SI][R] + r[SI][H];
           exit_rate[R] = 0;
-          exit_rate[H] = r[H][R];
+          exit_rate[H] = r[H][R]+r[H][D];
+          exit_rate[D] = 0;
 
-          if(r[S][A] <0 || r[S][P]<0){printf("Negative rates\n");}
+          if(r[S][E] <0 || r[E][A]<0 || r[E][P]<0){printf("Negative rates %lf %lf %lf\n", r[S][E], r[E][A],r[E][P]);}
+
+          if(r[S][E] <0 || r[E][A]<0 || r[E][P]<0){
+            double a = beta_multiplier;
+            double b = rate[age][S][E];
+            double c = 1/V;
+            double d =  (Cpars[0]*(n_per_room[i][room][A] - conf_by_state_in_room[A]*alphaQ - vacc_by_state_in_room[A]*alphaT) +    // SA
+                         Cpars[1]*(n_per_room[i][room][P] - conf_by_state_in_room[P]*alphaQ - vacc_by_state_in_room[P]*alphaT) +    // SP
+                         Cpars[2]*(n_per_room[i][room][MI]-conf_by_state_in_room[MI]*alphaQ - vacc_by_state_in_room[MI]*alphaT) +   // S-MI
+                         Cpars[3]*(n_per_room[i][room][SI]-conf_by_state_in_room[SI]*alphaQ - vacc_by_state_in_room[SI]*alphaT) +   // S-SI
+                         Cpars[4]*n_per_room[i][room][H]);
+            printf("Location %i Beta Multiplier %lf RateSE %lf 1/V %lf I/N %lf \n",i,a,b,c,d );
+          }
 
           int from = pop[ind[j]][s];
           if(uniform()<exit_rate[from]*dt){            // If the person is selected to move
@@ -1002,8 +874,10 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
 
             for(int to=0;to<n_states;to++){    // Loop over possible "to" states
 
+
               temp += (r[from][to]/exit_rate[from]);
               if(p<temp){                      // If such a transition must occur,
+                // printf("From %s to %s\n",states[from], states[to] );
                 pop[ind[j]][s] = to;           // Send this person to the "to" state.
 
                 n_per_location[i][from]--; n_per_location[i][to]++;
@@ -1014,7 +888,7 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
                 if(is_confined[ind[j]]==true){
                     conf_by_state_in_loc[from]--;      // change the number of confined in different states accordingly
                     conf_by_state_in_loc[to]++;
-                    if(conf_by_state_in_loc[S]<0 || conf_by_state_in_loc[A]<0||conf_by_state_in_loc[P]<0||conf_by_state_in_loc[MI]<0||conf_by_state_in_loc[SI]<0||conf_by_state_in_loc[R]<0||conf_by_state_in_loc[H]<0){printf("Negative confs\n");}
+                    if(conf_by_state_in_loc[S]<0 || conf_by_state_in_loc[E]<0 || conf_by_state_in_loc[A]<0||conf_by_state_in_loc[P]<0||conf_by_state_in_loc[MI]<0||conf_by_state_in_loc[SI]<0||conf_by_state_in_loc[R]<0||conf_by_state_in_loc[H]<0){printf("Negative confs\n");}
                 }
                 vacc_by_state_in_room[from]--;vacc_by_state_in_room[to]++;
 
@@ -1044,7 +918,7 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
 
 
                 }
-                else if(from==H && to == R){
+                else if(from==H && (to == R || to == D)){
                   // Remove confinement and move them home
                   int home = pop[ind[j]][h];
                   int home_room = randint(n_rooms[home]);
@@ -1105,7 +979,7 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
                   if(day>=result_declared_date[i]+7 && last_test_type[i]==0 && last_test_result[i]==-1){sym_rat_neg[n_srn] = i; n_srn++;} // Make separate list of symptomatics who
                                                                                                                                           // last tested negative on a RAT, more than 7 days ago
                 }
-                else if(pop[i][s]!=H && being_tested[i]==false && is_confined[i]==false){
+                else if(pop[i][s]!=H && pop[i][s]!=D && being_tested[i]==false && is_confined[i]==false){
                   list_of_remaining[n_remaining] = i; n_remaining++;
                 }
                 else{ not_eligible_for_testing++;}
@@ -1347,7 +1221,7 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
 
                     }
 
-                    if(pop[i][s]==H){is_confined[i]=false; person_isolated_time[i]=-1000;last_test_result[i]=0;} // If they've been hospitalised, do the same as for negative results,
+                    if(pop[i][s]==H || pop[i][s]==D){is_confined[i]=false; person_isolated_time[i]=-1000;last_test_result[i]=0;} // If they've been hospitalised, do the same as for negative results,
                                                                                                                  // only set their last test result to 0.(CHECK!!!!)
 
                     test_result[i] = 0;        // Reset test result to 0.
@@ -1451,12 +1325,12 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
               bool added = false;
               for(int j=0;j<len_vacc_targets;j++){
                 int v_target = vacc_targets[j];
-                if(pop[i][a]==v_target && pop[i][s]!=MI && pop[i][s]!=SI && pop[i][s]!=H && !is_vaccinated[i] && !being_tested[i]){
+                if(pop[i][a]==v_target && pop[i][s]!=MI && pop[i][s]!=SI && pop[i][s]!=H && pop[i][s]!=D && !is_vaccinated[i] && !being_tested[i]){
                   backup[pop[i][s]]++;
                   list_of_vacc.push_back(i); n_to_vacc++; added = true; break;
                 }
               }
-              if(added == false && pop[i][s]!=MI && pop[i][s]!=SI && pop[i][s]!=H && !is_vaccinated[i] && !being_tested[i]){
+              if(added == false && pop[i][s]!=MI && pop[i][s]!=SI && pop[i][s]!=H && pop[i][s]!=D && !is_vaccinated[i] && !being_tested[i]){
                 list_of_others.push_back(i); n_others++;
               }
             }
@@ -1519,7 +1393,7 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
       // Moving people around deterministically (WORK TO HOME)
 
       for(int i=0;i<n_pop;i++){
-        if(pop[i][s]!=H && is_confined[i] == false && loc_confined[pop[i][c]]==false){
+        if(pop[i][s]!=H && pop[i][s]!=D && is_confined[i] == false && loc_confined[pop[i][c]]==false){
 
           locations_moved++;
 
@@ -1528,13 +1402,6 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
           if(pop[i][c]==work_loc){ pop[i][c] = home_loc; n_per_location[work_loc][pop[i][s]]--; n_per_location[home_loc][pop[i][s]]++; n_per_room[work_loc][current_room[i]][pop[i][s]]--; current_room[i] = randint(n_rooms[home_loc]); n_per_room[home_loc][current_room[i]][pop[i][s]]++; }
         }
       }
-
-      // for(int i=start_schools; i<start_schools+n_schools;i++){    // Reset all the classrooms to 0.
-      //   // int school = i-start_schools;
-      //   for(int j=0;j<n_rooms[i];j++){
-      //     for(int k=0;k<n_states;k++){n_per_room[i][j][k]=0;}
-      //   }
-      // }
 
       midday_move_completed = false;
       first_move_done       = false;
@@ -1552,7 +1419,9 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
       // Increment the day, write the output to an array, and reset the number of tests  //
       day++;
 
-      output[day][0] = day; for(int q=0;q<n_states;q++){output[day][q+1]=n[q];} output[day][n_states+1]=hq_tests_conducted;output[day][n_states+2]=lq_tests_conducted;output[day][n_states+3]=tests_remaining_today;output[day][n_states+4]=currently_confined;output[day][n_states+5]=unlockedtoday;output[day][n_states+6]=locked;output[day][n_states+7]=vaccines_administered;
+      output[day][0] = day; for(int q=0;q<n_states;q++){output[day][q+1]=n[q];}
+      output[day][n_states+1] = vaccines_administered;
+      output[day][n_states+2]=hq_tests_conducted;output[day][n_states+3]=lq_tests_conducted;output[day][n_states+4]=tests_remaining_today;output[day][n_states+5]=currently_confined;output[day][n_states+6]=unlockedtoday;output[day][n_states+7]=locked;
       tests_remaining_today = tests_available_daily;
       lq_tests_today = lq_tests_daily;
       hq_tests_today = hq_tests_daily;
@@ -1576,7 +1445,7 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
   for(int i=0;i<n_pop;i++){               // Find all HCW, and mark those that have recovered.
     if(pop[i][w]<n_hospitals){
       hcw++;
-      if(pop[i][s]==R){hcw_recovered++;}
+      if(pop[i][s]==R || pop[i][s]==D){hcw_recovered++;}
     }
   }
 
@@ -1589,237 +1458,130 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
 
 }// End of TargetedTesting function.
 
-// void createHeatmap(int mc_runs, int tf, double begin_at, double lock_homes, double quarantine_when_sample_taken, double Tpars[][4]){
-//
-//   double p[] = {0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0};          // RAT test fractions to be varied
-//   int p_len  = sizeof(p)/sizeof(p[0]);
-//
-//   double s[] = {0.5, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95};      // RAT test sensitivities to be varied
-//   int s_len  = sizeof(s)/sizeof(s[0]);
-//
-//   double dtr[]={0.1, 0.5};                                                       // Daily Testing Rates to be varied
-//   int dtr_len = sizeof(dtr)/sizeof(dtr[0]);
-//
-//
-//    for(int i=0;i<mc_runs;i++){
-//     for(int j=0;j<s_len;j++){
-//
-//       Tpars[0][0] = s[j];                  // Set RAT sensitivity
-//
-//       for(int k=0; k<p_len;k++){
-//
-//         Tpars[0][3] = p[k];                // Set RAT fraction in mixture
-//         Tpars[1][3] = 1-p[k];              // Set PCR fraction in mixture
-//
-//         for(int l =0; l<dtr_len;l++){
-//
-//          double test_frac = dtr[l];              // Set daily testing rate
-//
-//              createPopulation();
-//              Targeted_Run(Tpars,
-//                          tf,
-//                          lock_homes,
-//                          quarantine_when_sample_taken,
-//                          begin_at,
-//                          test_frac,
-//                          100.0, // start vacc
-//                          0.0,
-//                          {},
-//                          0.0,
-//                          i);
-//
-//         }
-//       }
-//     }
-//    }
-// }
 
-// int main() {
-//
-//   /************ PARAMETERS ************/
-//
-//   double lambda_S = 0.35;  // Changed from 0.25
-//   // double gamma    = 0.5;  // Fraction going from S->A
-//
-//   double lambda_A = 0.143;
-//   double lambda_P = 0.5;
-//   // double delta    = 0.85;  // Fraction going from P->MI
-//
-//   double lambda_MI = 0.1;
-//   double lambda_SI = 0.5;
-//   // double sigma     = 0.8;
-//
-//   double lambda_H  = 0.1;
-//
-//   /**************************************/
-//
-//   /************* AGE FACTOR *************/
-//   // double lambda_S_array[] = {0.34*lambda_S, 0.67*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.24*lambda_S, 1.47*lambda_S, 1.47*lambda_S};
-//   double lambda_S_array[] = {1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S};
-//   double gamma_array[] = {1-0.5, 1-0.55,1- 0.6, 1-0.65,1-0.7, 1-0.75,1-0.8, 1-0.85,1- 0.9, 1-0.9};
-//
-//   double delta_array[] = {1-0.0005,  1-0.00165,  1-0.00720,  1-0.02080,  1-0.03430,  1-0.07650,  1-0.13280,  1-0.20655,  1-0.24570,  1-0.24570};
-//
-// //  double sigma_array[] = {0.00002, 0.00002, 0.0001, 0.00032, 0.00098, 0.00265, 0.00766, 0.02439, 0.08292, 0.16190};
-//
-//   double sigma_array[] = {1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0};
-//
-//
-//   double lambda_A_array[]  = {lambda_A , lambda_A  , lambda_A , lambda_A ,  lambda_A  , lambda_A  , lambda_A, lambda_A  , lambda_A  , lambda_A};
-//   double lambda_P_array[]  = {lambda_P , lambda_P  , lambda_P , lambda_P ,  lambda_P  , lambda_P  , lambda_P, lambda_P  , lambda_P  , lambda_P};
-//
-//   double lambda_MI_array[] = {lambda_MI, lambda_MI , lambda_MI , lambda_MI  , lambda_MI , lambda_MI , lambda_MI , lambda_MI , lambda_MI , lambda_MI};
-//   double lambda_SI_array[] = {lambda_SI, lambda_SI , lambda_SI , lambda_SI  , lambda_SI , lambda_SI , lambda_SI , lambda_SI , lambda_SI , lambda_SI};
-//
-//   double lambda_H_array[]  = {lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H};
-//
-//   /**************************************/
-//
-//
-//
-//   /************* RATE ARRAY *************/
-//
-//   for(int i=0;i<max_age;i++){
-//     rate[i][S][A] = gamma_array[i]*lambda_S_array[i];        // S -> A
-//     rate[i][S][P] = (1 - gamma_array[i])*lambda_S_array[i];  // S -> P
-//     rate[i][A][R] = lambda_A_array[i];                       // A -> R
-//     rate[i][P][MI]= delta_array[i]*lambda_P_array[i];        // P -> MI
-//     rate[i][P][SI]= (1-delta_array[i])*lambda_P_array[i];    // P -> SI
-//     rate[i][MI][R]= lambda_MI_array[i];                      // MI -> R
-//     rate[i][SI][R]= (1-sigma_array[i])*lambda_SI_array[i];   // SI -> R
-//     rate[i][SI][H]= sigma_array[i]*lambda_SI_array[i];       // SI -> H
-//     rate[i][H][R] = lambda_H_array[i];                       // H -> R
-//   }
-//
-//   /**************************************/
-//
-//
-//   /********* TESTING PARAMETERS *********/
-//
-//   bool lock_homes=false;                   // Change to true to quarantine homes
-//   bool quarantine_when_sample_taken=false; // Change to true to quarantine homes when sample is taken
-//   double begin_at  = 100;                  // Start testing when this percentage of the population has recovered
-//   double test_frac = 0.0;                  // Daily testing rate (in percentage)
-//
-//   double rat_delay = 0;                     // RAT test delay
-//   double pcr_delay = 0;                     // PCR test delay
-//
-//   double rat_fraction = 0;                  // RAT fraction in mixture
-//   double pcr_fraction = 1-rat_fraction;     // PCR fraction in mixture
-//
-//   double Tpars[2][4] = {{0.5, 0.98, rat_delay, rat_fraction},   // {{RAT Sensitivity, RAT Specificity, RAT Test Delay, RAT Fraction in Mixture},
-//                         {1.0,  1.0, pcr_delay, pcr_fraction}};  //  {PCR Sensitivity, PCR Specificity, PCR Test Delay, PCR Fraction in Mixture}}
-//
-//   /**********************************/
-//
-//   int tf = 200;                            // Total simulation run time in days
-//
-//
-//
-//   //** Monte Carlo run with the above specifications **//
-//
-//   int mc_runs = 2;
-//
-//   //******************************** NoVaccination and Don'tLockSchools ********************************//
-//   printf("No Vaccination, don't lock schools.\n");
-//   unlockSchoolsAt = 0.0;
-//   for(int i=0;i<mc_runs;i++){
-//     dvr = 0.0;
-//
-//     createPopulation();                      // Create a random population with a fixed infection seed (default: 0.1%), set by n_asym.
-//                                              // Resets the pop array, n_per_location array, and people_linked_to array.
-//
-//     Targeted_Run(Tpars,
-//                  tf,
-//                  lock_homes,
-//                  quarantine_when_sample_taken,
-//                  begin_at,
-//                  test_frac,
-//                  100.0, //<-- Start vacc at
-//                  dvr,
-//                  unlockSchoolsAt,//<-- unlockSchoolsAt 0
-//                  0);
-//   }
-//
-//
-//   //******************************** NoVaccination and LOCKSchools ********************************//
-//   unlockSchoolsAt = 100;
-//   printf("No Vaccination, unlock schools at 100%%.\n");
-//   for(int i=0;i<mc_runs;i++){
-//     dvr = 0.0;
-//
-//     createPopulation();                      // Create a random population with a fixed infection seed (default: 0.1%), set by n_asym.
-//                                              // Resets the pop array, n_per_location array, and people_linked_to array.
-//
-//     Targeted_Run(Tpars,
-//                  tf,
-//                  lock_homes,
-//                  quarantine_when_sample_taken,
-//                  begin_at,
-//                  test_frac,
-//                  100.0, //<-- Start vacc at
-//                  dvr,
-//                  unlockSchoolsAt,//<-- unlockSchoolsAt
-//                  0);
-//   }
-//
-//
-//   /********* VACCINATION PARAMETERS *********/
-//   double sv[] = {0.0};
-//   int sv_len  = sizeof(sv)/sizeof(sv[0]);
-//
-//   vaccination_strategy = descending;
-//
-//   double unlocks[] = {0, 5, 10, 20, 30, 40, 100};
-//   double len_unlocks = sizeof(unlocks)/sizeof(unlocks[0]);
-//
-//   /**********************************/
-//
-//
-//
-//
-// //******************************** UnlockSchools ********************************//
-//
-//   dvr = 0.2;
-//
-//   for(int i=0;i<mc_runs;i++){
-//
-//     for (int u=0; u<len_unlocks;u++){
-//
-//       unlockSchoolsAt = unlocks[u];
-//       printf("Vaccination, unlock schools at %g%%.\n",unlocks[u]);
-//       for(int j=0;j<sv_len;j++){
-//
-//         createPopulation();                      // Create a random population with a fixed infection seed (default: 0.1%), set by n_asym.
-//                                                  // Resets the pop array, n_per_location array, and people_linked_to array.
-//
-//         Targeted_Run(Tpars,
-//                      tf,
-//                      lock_homes,
-//                      quarantine_when_sample_taken,
-//                      begin_at,
-//                      test_frac,
-//                      sv[j],
-//                      dvr,
-//                      unlockSchoolsAt,
-//                      0);
-//       }
-//     }
-//
-//   }
-//
-//
-//
-//   //**********************************************************//
-//
-//   // /*********** UNCOMMENT THIS SECTION TO CREATE HEATMAPS: ************/
-//   // /*** NOTE: A typical run of the heatmap creates 220 text files in the same folder as the code, with unique names. A complete heatmap takes about 90 minutes to run. ***/
-//   //
-//   // /*** If unchanged, the heatmaps will have the begin_at, lock_homes, quarantine_when_sample_taken, and test delays that were set above. ***/
-//   // /*** Test fractions and sensitivities are varied in the createHeatmap function, as is the daily testing rate.                          ***/
-//   //
-//   // int mc_runs = 1;
-//   // createHeatmap(mc_runs, tf, begin_at, lock_homes, quarantine_when_sample_taken, Tpars);
-//   //
-//   // //************************************************************//
-//  }
+
+int main() {
+
+  char filename[1000]="synthetic_population.csv";
+  // for(int tmp=0;tmp<10;tmp++){printf("%s\n","Blank");}
+  createPopulation(filename);
+
+  /************ PARAMETERS ************/
+
+  double lambda_S = 0.7;  // Changed from 0.35
+  // double gamma    = 0.5;  // Fraction going from S->A
+
+  double lambda_E = 1/4.5;
+
+  double lambda_A = 1.0/8;//0.143;
+  double lambda_P = 1/1.1;//0.5;
+  // double delta    = 0.85;  // Fraction going from P->MI
+
+  double lambda_MI = 1.0/8;//0.1;
+  double lambda_SI = 1/1.5;//0.5;
+  // double sigma     = 0.8;
+
+  double lambda_H  = 1/18.1;//0.1;
+
+  /**************************************/
+
+
+  /************* AGE FACTOR *************/
+  // double lambda_S_array[] = {0.34*lambda_S, 0.67*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.24*lambda_S, 1.47*lambda_S, 1.47*lambda_S};
+  double lambda_S_array[] = {1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S};
+
+  double gamma_array[] = {1-0.5, 1-0.55,1- 0.6, 1-0.65,1-0.7, 1-0.75,1-0.8, 1-0.85,1- 0.9, 1-0.9};
+
+  double delta_array[] = {1-0.0005,  1-0.00165,  1-0.00720,  1-0.02080,  1-0.03430,  1-0.07650,  1-0.13280,  1-0.20655,  1-0.24570,  1-0.24570};
+
+ double sigma_array[] = {0.00002, 0.00002, 0.0001, 0.00032, 0.00098, 0.00265, 0.00766, 0.02439, 0.08292, 0.16190};
+
+
+  double lambda_E_array[]  = {lambda_E , lambda_E  , lambda_E , lambda_E ,  lambda_E  , lambda_E  , lambda_E, lambda_E  , lambda_E  , lambda_E};
+  double lambda_A_array[]  = {lambda_A , lambda_A  , lambda_A , lambda_A ,  lambda_A  , lambda_A  , lambda_A, lambda_A  , lambda_A  , lambda_A};
+  double lambda_P_array[]  = {lambda_P , lambda_P  , lambda_P , lambda_P ,  lambda_P  , lambda_P  , lambda_P, lambda_P  , lambda_P  , lambda_P};
+
+  double lambda_MI_array[] = {lambda_MI, lambda_MI , lambda_MI , lambda_MI  , lambda_MI , lambda_MI , lambda_MI , lambda_MI , lambda_MI , lambda_MI};
+  double lambda_SI_array[] = {lambda_SI, lambda_SI , lambda_SI , lambda_SI  , lambda_SI , lambda_SI , lambda_SI , lambda_SI , lambda_SI , lambda_SI};
+
+  double lambda_H_array[]  = {lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H};
+
+  /**************************************/
+
+
+
+  /************* RATE ARRAY *************/
+
+  for(int i=0;i<max_age;i++){
+    rate[i][S][E] = lambda_S_array[i];                       // S -> E
+    rate[i][E][A] = gamma_array[i]*lambda_E_array[i];        // E -> A
+    rate[i][E][P] = (1 - gamma_array[i])*lambda_E_array[i];  // E -> P
+    rate[i][A][R] = lambda_A_array[i];                       // A -> R
+    rate[i][P][MI]= delta_array[i]*lambda_P_array[i];        // P -> MI
+    rate[i][P][SI]= (1-delta_array[i])*lambda_P_array[i];    // P -> SI
+    rate[i][MI][R]= lambda_MI_array[i];                      // MI -> R
+    rate[i][SI][R]= 0;                                       // SI -> R (Nobody recovers directly from SI)
+    rate[i][SI][H]= lambda_SI_array[i];                      // SI -> H
+    rate[i][H][D] = sigma_array[i]*lambda_H_array[i];        // H -> R
+    rate[i][H][R] = (1-sigma_array[i])*lambda_H_array[i];    // H -> R
+  }
+
+  /**************************************/
+
+
+  /********* TESTING PARAMETERS *********/
+
+  bool lock_homes=false;                   // Change to true to quarantine homes
+  bool quarantine_when_sample_taken=false; // Change to true to quarantine homes when sample is taken
+  double begin_at  = 100;                  // Start testing when this percentage of the population has recovered
+  double test_frac = 0.0;                  // Daily testing rate (in percentage)
+
+  double rat_delay = 0;                    // RAT test delay
+  double pcr_delay = 0;                    // PCR test delay
+
+  double rat_fraction = 0;                 // RAT fraction in mixture
+  double pcr_fraction = 1-rat_fraction;    // PCR fraction in mixture
+
+  double Tpars[2][4] = {{0.5, 0.98, rat_delay, rat_fraction},   // {{RAT Sensitivity, RAT Specificity, RAT Test Delay, RAT Fraction in Mixture},
+                        {1.0,  1.0, pcr_delay, pcr_fraction}};  //  {PCR Sensitivity, PCR Specificity, PCR Test Delay, PCR Fraction in Mixture}}
+
+  /**********************************/
+
+  int tf = 200;                            // Total simulation run time in days
+
+
+
+  //** Monte Carlo run with the above specifications **//
+
+  int mc_runs = 1;
+
+  double unlockSchoolsAtArray[] = {0,10,20,30,40,50,60,70,80,90,100};
+  int n_unlocks = sizeof(unlockSchoolsAtArray)/sizeof(unlockSchoolsAtArray[0]);
+
+  for(int i=0;i<mc_runs;i++){
+    dvr = 0.2;
+    vaccination_strategy=descending;
+    // printf("Run %i\n",i);
+
+    for(int j=0;j<n_unlocks;j++){
+      unlockSchoolsAt = unlockSchoolsAtArray[j];
+
+      createPopulation(filename);              // Create a random population with a fixed infection seed (default: 1%) and recovered fraction (default: 30%), set by initial_asymptomatic_fraction
+                                               // Resets the pop array, n_per_location array, and people_linked_to array.
+
+      Targeted_Run(Tpars,
+                   tf,
+                   lock_homes,
+                   quarantine_when_sample_taken,
+                   begin_at,
+                   test_frac,
+                   0.0, //<-- Start vacc at
+                   dvr,
+                   unlockSchoolsAt,//<-- unlockSchoolsAt
+                   0);
+     }
+  }
+
+
+
+ }

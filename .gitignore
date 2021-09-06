@@ -1,2 +1,6 @@
 data/
 *.txt
+*.out
+*.o
+*.sh
+.ipynb_checkpoints/
