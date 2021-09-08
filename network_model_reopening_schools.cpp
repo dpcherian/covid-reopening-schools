@@ -148,7 +148,7 @@ bool is_adult[n_pop]={};
 // New variables for vaccinated //
 
 double infection_reduction       = 1.0 - 0.441;
-double gamma_fractional_increase = 0.3;
+double gamma_fractional_increase = 1.0 - 0.598;
 double transmission_reduction    = 0.4;
 
 int vaccination_strategy = 0;
@@ -164,8 +164,10 @@ double dvr = 0.0;
 
 bool quarantine_confined = true;                   // Change to false if you don't want to confine individuals who've tested positive
 bool lock_schools = true;                          // NEW: Don't allow people to go to schools. Default: true (start schools locked)
+bool shuffle_teachers = false;                     // NEW: Variable that decides whether teachers move between classrooms. Default: false (don't let them move.)
 
-const int op_width = 1 + n_states + 3 + 2 + 1 + 1;     // Width of output array: <time>(1) <Number of states> <Testing details>(3) <Home quarantine details>(3)
+const int op_width = 1 + n_states + 3 + 2 + 1 + 1 + 1;     // Width of output array: <time>(1) <Number of states> <Testing details>(3) <Home quarantine details>(3)
+const int age_op_width = 1 + (n_states+2)*max_age;         // Width of age-wise output array <time>(1) (<Number of states> <Vaccines administered> <Background Seropositivity> ) x max_age
 int positives = 0;
 /*****************************************************************/
 
@@ -250,6 +252,9 @@ void shuffle(int start, int end, vector<int> array)
 
 void readcsv(char *filename)
 {
+int num_to_prevaccinate = (int)(initial_vaccinated_fraction*n_pop);
+// printf("Number to prevacc at start %i\n",num_to_prevaccinate );
+
 FILE* fp = fopen(filename, "rt");
 if (fp==NULL) {printf("no such file\n");exit(0);}
 
@@ -283,9 +288,10 @@ while (row<n_pop)
 		column++;
 		}
 
-    is_vaccinated[row] = (uniform()<initial_vaccinated_fraction) ? true : false;
+    is_vaccinated[row] = (num_to_prevaccinate>0 && pop[row][a] >= 6 && uniform()<0.8) ? true : false;
     vaccinated_on[row] = is_vaccinated[row] ? -1000 : 1000;
     if(is_vaccinated[row]){
+      num_to_prevaccinate--;
       vaccs_per_state[pop[row][s]]++;
       agewise_vaccines_administered[pop[row][a]]++;
       vaccines_administered++;
@@ -309,6 +315,24 @@ while (row<n_pop)
 
 	free(tofree); // I don't fully understand why I need to keep freeing buffer and reallocating it, and why it needs to be done like this, but anything else doesn't seem to work!
 	}
+
+  //*********** Prevaccinate randomly if any doses are left ********//
+  // printf("Num to prevacc before random %i\n", num_to_prevaccinate);
+  while(num_to_prevaccinate>0){
+    int p = randint(n_pop);
+    if(!is_vaccinated[p]){
+      is_vaccinated[p] = is_adult[p] ? true : false;
+      vaccinated_on[p] = is_vaccinated[p] ? -1000 : 1000;
+      if(is_vaccinated[p]){
+        num_to_prevaccinate--;
+        vaccs_per_state[pop[p][s]]++;
+        agewise_vaccines_administered[pop[p][a]]++;
+        vaccines_administered++;
+      }
+    }
+  }
+  // printf("Num to prevacc after random %i, vaccs administered %i\n", num_to_prevaccinate,vaccines_administered);
+  //************ Done prevaccinating *********************************//
 
 fclose(fp);
 
@@ -355,6 +379,7 @@ void createPopulation(char *filename){
   n_asym = 0;
   n_rec  = 0;
   vaccines_administered = 0;
+  for(int age=0;age<max_age;age++){agewise_vaccines_administered[age]=0;}
 
   // *************************************************//
   // *************** LOCATION SETUP ******************//
@@ -409,8 +434,9 @@ void createPopulation(char *filename){
 
   // for(int i=0; i<n_pop;i++){
   //   for(int j=0;j<person_attr;j++){
-  //     printf("%i,", pop[i][j]);
+  //     printf("%i, ", pop[i][j]);
   //   }
+  //   printf("%s",is_vaccinated[i]?"1":"0");
   //   printf("\n");
   // }
   // exit(2);
@@ -419,7 +445,7 @@ void createPopulation(char *filename){
 
 
 char outputFilename[1000];
-void writetofile(int output[][op_width], int age_output[][(n_states+1)*max_age + 1], int tf, double Tpars[2][4], double begin_at, double test_frac, double time_taken, int details[9],int iter){
+void writetofile(int output[][op_width], int age_output[][age_op_width], int tf, double Tpars[2][4], double begin_at, double test_frac, double time_taken, int details[9],int iter){
   // FOR REFERENCE: int details[] = {quarantine_confined, lock_homes, quarantine_when_sample_taken, lq_tests_conducted, hq_tests_conducted, tests_conducted, results_declared, locations_moved, hcw_recovered};
   // Write output to a FILE
   errno = 0;      // Variable to store error number in case file open does not work
@@ -458,13 +484,13 @@ void writetofile(int output[][op_width], int age_output[][(n_states+1)*max_age +
 
     fprintf(fpt,"# Vaccination strategy     : %s\n", vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset");
     fprintf(fpt,"# Total Vaccines Given     : %d\n", vaccines_administered);
-    fprintf(fpt,"# Schools unlocked at      : %g%% vaccinated\n", unlockSchoolsAt);
+    fprintf(fpt,"# Schools unlocked on day  : %g\n", unlockSchoolsAt);
 
     fprintf(fpt,"# Rate Array: \n");
     for(int i=0; i<n_states;i++){fprintf(fpt,"# ");for(int j=0; j<n_states;j++){fprintf(fpt,"%5g ", rate[0][i][j]);}fprintf(fpt,"\n");}// NOTE! : Change to correct rates
     fprintf(fpt,"###### END LOG #####################\n");
     fprintf(fpt,"#\n");
-    fprintf(fpt, "# %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s\n","Day","nS","nE","nA","nP","nMI","nSI","nR","nH","nD","PCR_conducted_today", "RAT_conducted_today", "Tests_remaining_today", "Agents_currently_confined", "Quarantines_removed_today","Locations_in_quarantine_today" );
+    fprintf(fpt, "#%s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s\n","Day","nS","nE","nA","nP","nMI","nSI","nR","nH","nD","nV","nBS","PCR_conducted_today", "RAT_conducted_today", "Tests_remaining_today", "Agents_currently_confined", "Quarantines_removed_today","Locations_in_quarantine_today" );
 
     for(int i=0;i<tf;i++){
       for(int j=0; j<op_width;j++){
@@ -511,7 +537,7 @@ void writetofile(int output[][op_width], int age_output[][(n_states+1)*max_age +
 
     fprintf(fpt,"# Vaccination strategy     : %s\n", vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset");
     fprintf(fpt,"# Total Vaccines Given     : %d\n", vaccines_administered);
-    fprintf(fpt,"# Schools unlocked at      : %g%% vaccinated\n", unlockSchoolsAt);
+    fprintf(fpt,"# Schools unlocked on day  : %g\n", unlockSchoolsAt);
 
     fprintf(fpt1,"# Rate Array: \n");
     for(int i=0; i<n_states;i++){fprintf(fpt1,"# ");for(int j=0; j<n_states;j++){fprintf(fpt1,"%5g ", rate[0][i][j]);}fprintf(fpt1,"\n");}// NOTE! : Change to correct rates
@@ -524,11 +550,12 @@ void writetofile(int output[][op_width], int age_output[][(n_states+1)*max_age +
         fprintf(fpt1, "%s%i ",states[i],(j+1)*10);
       }
       fprintf(fpt1, "%s%i ","V",(j+1)*10);
+      fprintf(fpt1, "%s%i ","BS",(j+1)*10);
     }
     fprintf(fpt1,"\n");
 
     for(int i=0;i<tf;i++){
-      for(int j=0; j<(n_states+1)*max_age + 1;j++){
+      for(int j=0; j<(n_states+2)*max_age + 1;j++){
         fprintf(fpt1, "%i ", age_output[i][j]);
       }
       fprintf(fpt1, "\n");
@@ -617,14 +644,35 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
   bool lock_schools = true; //NEW: Start with schools always locked!
 
   int output[tf+1][op_width];   // Output array, to be printed to file
-  int age_output[tf+1][(n_states+1)*max_age + 1]; // NEW: to print out output per age
+  int age_output[tf+1][age_op_width]; // NEW: to print out output per age
+
+
+  // Computing Background Seropositivity **************************************//
+
+  double some_protection = 0;
+  double agewise_some_protection[max_age] = {};
+  double agewise_populations[max_age] = {};
+
+  for(int p=0;p<n_pop;p++){
+    agewise_populations[pop[p][a]]++;
+    if(pop[p][s]==S && !is_vaccinated[p]){some_protection++; agewise_some_protection[pop[p][a]]++;}
+  }
+
+  double bs = n_pop - some_protection;
+  double agewise_bs[max_age] = {};
+
+  for(int age=0;age<max_age;age++){
+    agewise_bs[age] = agewise_populations[age] - agewise_some_protection[age];
+  }
 
   // First line of output
   output[day][0] = day; for(int q=0;q<n_states;q++){output[day][q+1]=n[q];}
   output[day][n_states+1] = vaccines_administered;
-  output[day][n_states+2]=hq_tests_conducted;output[day][n_states+3]=lq_tests_conducted;output[day][n_states+4]=tests_remaining_today;output[day][n_states+5]=0;output[day][n_states+6]=0;output[day][n_states+7]=0;
+  output[day][n_states+2] = bs;
+  output[day][n_states+3]=hq_tests_conducted;output[day][n_states+4]=lq_tests_conducted;output[day][n_states+5]=tests_remaining_today;output[day][n_states+6]=0;output[day][n_states+7]=0;output[day][n_states+8]=0;
 
-  age_output[day][0] = day; int counter = 1; for(int r=0;r<max_age;r++){for(int q=0;q<n_states;q++){age_output[day][counter]=n_per_age[r][q];counter++;} age_output[day][counter]=agewise_vaccines_administered[r];counter++;}
+  age_output[day][0] = day; int counter = 1; for(int r=0;r<max_age;r++){for(int q=0;q<n_states;q++){age_output[day][counter]=n_per_age[r][q];counter++;} age_output[day][counter]=agewise_vaccines_administered[r];counter++;
+  age_output[day][counter]=agewise_bs[r];counter++;}
 
   double exit_rate[n_states] = {};
 
@@ -685,7 +733,7 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
               current_room[person] = set_classroom; // Set the person to their assigned classroom.
               // n_per_room[i][set_classroom][person_state]++;
             }
-            else if(is_adult[person]){
+            else if(is_adult[person] && shuffle_teachers){
               int from_room = current_room[person];  // Get current room of teacher in school i
               int to_room = randint( n_rooms[i] ); // Choose random room from the number of rooms in this school
 
@@ -793,14 +841,18 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
 
             int vday   = vaccinated_on[ind[j]];
 
-            beta_multiplier = infection_reduction;
-
             double this_gamma = rate[age][E][A]/(rate[age][E][A]+rate[age][E][P]);
 
             //      if(test_subjects[tindex][2] == 1){ f = std::min(this_gamma + (0.8*(1 - this_gamma)/42)*(t - vday),this_gamma + (0.8*(1 - this_gamma)/42)*28);} // first vaccination didn't work perfectly
             // else if(test_subjects[tindex][2] == 2){ f = std::min(this_gamma + (0.8*(1 - this_gamma)/42)*(t - vday),this_gamma + (0.8*(1 - this_gamma)/42)*42);}      // second vaccination worked perfectly
             int fd = 90+14;//28;
-            f = std::min(this_gamma + (gamma_fractional_increase*(1 - this_gamma)/fd)*(t - vday),this_gamma + (gamma_fractional_increase*(1 - this_gamma)/fd)*fd); // the multipler changes from gamma to this.
+            // beta_multiplier = infection_reduction;
+            beta_multiplier = std::min(std::max(1 + (infection_reduction - 1)*(t - vday)/fd, 1 + (infection_reduction - 1)), 1.0);
+
+            f = std::min(std::max(this_gamma + (1 - (gamma_fractional_increase/infection_reduction)*(1 - this_gamma) - this_gamma)*(t - vday)/fd, this_gamma), this_gamma + (1 - (gamma_fractional_increase/infection_reduction)*(1 - this_gamma) - this_gamma));
+
+
+            // f = std::min(this_gamma + (gamma_fractional_increase*(1 - this_gamma)/fd)*(t - vday),this_gamma + (gamma_fractional_increase*(1 - this_gamma)/fd)*fd); // the multipler changes from gamma to this.
 
             //****** To print out gamma for a single vaccinated individual ******//
             // if(ind[j]==31){printf("Vaccinated person %i age %i gamma %lf Vaccinated on %i Today %i \n",ind[j],age,f,vaccinated_on[ind[j]], day);}
@@ -1249,7 +1301,7 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
             int len_vacc_targets=0;
 
             if(vaccination_strategy == descending){
-              if(t<=30){
+              if(t<0){
                 vacc_targets.push_back(6);
                 vacc_targets.push_back(7);
                 vacc_targets.push_back(8);
@@ -1257,7 +1309,7 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
 
                 len_vacc_targets = 4;
               }
-              else if(t>30 && t<=60){
+              else if(t>0 && t<=30){
                 vacc_targets.push_back(4);
                 vacc_targets.push_back(5);
                 vacc_targets.push_back(6);
@@ -1419,18 +1471,34 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
       // Increment the day, write the output to an array, and reset the number of tests  //
       day++;
 
+      // Computing Background Seropositivity **************************************//
+
+      double some_protection = 0;
+      double agewise_some_protection[max_age] = {};
+      double agewise_populations[max_age] = {};
+
+      for(int p=0;p<n_pop;p++){
+        agewise_populations[pop[p][a]]++;
+        if(pop[p][s]==S && !is_vaccinated[p]){some_protection++; agewise_some_protection[pop[p][a]]++;}
+      }
+
+      double bs = n_pop - some_protection;
+      double agewise_bs[max_age] = {};
+
+      for(int age=0;age<max_age;age++){
+        agewise_bs[age] = agewise_populations[age] - agewise_some_protection[age];
+      }
+
       output[day][0] = day; for(int q=0;q<n_states;q++){output[day][q+1]=n[q];}
       output[day][n_states+1] = vaccines_administered;
-      output[day][n_states+2]=hq_tests_conducted;output[day][n_states+3]=lq_tests_conducted;output[day][n_states+4]=tests_remaining_today;output[day][n_states+5]=currently_confined;output[day][n_states+6]=unlockedtoday;output[day][n_states+7]=locked;
+      output[day][n_states+2] = bs;
+      output[day][n_states+3]=hq_tests_conducted;output[day][n_states+4]=lq_tests_conducted;output[day][n_states+5]=tests_remaining_today;output[day][n_states+6]=currently_confined;output[day][n_states+7]=unlockedtoday;output[day][n_states+8]=locked;
       tests_remaining_today = tests_available_daily;
       lq_tests_today = lq_tests_daily;
       hq_tests_today = hq_tests_daily;
 
-      age_output[day][0] = day; int counter = 1; for(int r=0;r<max_age;r++){for(int q=0;q<n_states;q++){age_output[day][counter]=n_per_age[r][q];counter++;} age_output[day][counter] = agewise_vaccines_administered[r]; counter++;}
-
-      // printf("Day %3i | ",day);
-      // for(int q=0;q<n_states;q++){int counter = 1; for(int r=0;r<max_age;r++){printf("%4i ",n_per_age[r][q]);counter++;}}
-      // printf("\n");
+      age_output[day][0] = day; int counter = 1; for(int r=0;r<max_age;r++){for(int q=0;q<n_states;q++){age_output[day][counter]=n_per_age[r][q];counter++;} age_output[day][counter] = agewise_vaccines_administered[r]; counter++;
+      age_output[day][counter] = agewise_bs[r]; counter++;}
 
     }
 
@@ -1464,7 +1532,7 @@ int main() {
 
   char filename[1000]="synthetic_population.csv";
   // for(int tmp=0;tmp<10;tmp++){printf("%s\n","Blank");}
-  createPopulation(filename);
+  // createPopulation(filename);
 
   /************ PARAMETERS ************/
 
@@ -1558,28 +1626,36 @@ int main() {
   double unlockSchoolsAtArray[] = {0,10,20,30,40,50,60,70,80,90,100};
   int n_unlocks = sizeof(unlockSchoolsAtArray)/sizeof(unlockSchoolsAtArray[0]);
 
+  double irf[] = {30.0/100.0, 50.0/100.0};
+  int n_irf    = sizeof(irf)/sizeof(irf[0]);
+
   for(int i=0;i<mc_runs;i++){
     dvr = 0.2;
     vaccination_strategy=descending;
-    // printf("Run %i\n",i);
 
-    for(int j=0;j<n_unlocks;j++){
-      unlockSchoolsAt = unlockSchoolsAtArray[j];
+    for(int r=0;r<n_irf;r++){
+      initial_recovered_fraction = irf[r];
 
-      createPopulation(filename);              // Create a random population with a fixed infection seed (default: 1%) and recovered fraction (default: 30%), set by initial_asymptomatic_fraction
-                                               // Resets the pop array, n_per_location array, and people_linked_to array.
+      for(int j=0;j<n_unlocks;j++){
+        unlockSchoolsAt = unlockSchoolsAtArray[j];
 
-      Targeted_Run(Tpars,
-                   tf,
-                   lock_homes,
-                   quarantine_when_sample_taken,
-                   begin_at,
-                   test_frac,
-                   0.0, //<-- Start vacc at
-                   dvr,
-                   unlockSchoolsAt,//<-- unlockSchoolsAt
-                   0);
-     }
+        createPopulation(filename);              // Create a random population with a fixed infection seed (default: 1%) and recovered fraction (default: 30%), set by initial_asymptomatic_fraction
+                                                 // Resets the pop array, n_per_location array, and people_linked_to array.
+
+        Targeted_Run(Tpars,
+                     tf,
+                     lock_homes,
+                     quarantine_when_sample_taken,
+                     begin_at,
+                     test_frac,
+                     0.0, //<-- Start vacc at
+                     dvr,
+                     unlockSchoolsAt,//<-- unlockSchoolsAt
+                     0);
+       }
+    }
+
+
   }
 
 

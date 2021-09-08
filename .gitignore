@@ -4,3 +4,4 @@ data/
 *.o
 *.sh
 .ipynb_checkpoints/
+*.ipynb
