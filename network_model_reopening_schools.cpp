@@ -18,206 +18,17 @@ std::random_device rd;
 std::mt19937 gen(rd());
 // std::mt19937 gen(-1);
 
-int poisson(double mu)  // Generate a Poisson Random Number with mean mu
-{
-    std::poisson_distribution<> d(mu);
-    return d(gen);
-}
-
 double uniform()        // Generate a uniform random number between [0,1)
 {
     std::uniform_real_distribution<> d(0.0,1.0);
     return d(gen);
 }
 
-int randint(int a,int b) // Generate a uniform random integer in [a, b)
-{
-    std::uniform_int_distribution<> d(a,b-1);
-    return d(gen);
-}
-
-
 int randint(int b) // Generate a uniform random number in [0, b)
 {
     std::uniform_int_distribution<> d(0,b-1);
     return d(gen);
 }
-
-/*****************************************************************/
-
-
-/* Global variables *******************************************/
-
-double dt = 0.1;
-char output_folder[100] = "data";
-
-const int mult = 1;              // Multiplier to scale up problem (1: n_pop = 1 x 10,000, 2: n_pop = 20,000, etc.)
-
-const int n_pop = mult*20316;    // Total population
-const int n_loc = mult*6623;     // Total number of locations
-const int n_net = mult*123;      // Total number of networks
-const int n_overlap = n_net+1;   // Start position of home locations + 1
-const int n_hospitals = mult*1;  // Set the number of hospitals.
-
-const int start_schools = n_hospitals; // Where school locations start
-const int n_schools = mult*1;   // Set the number of schools (10)
-
-const int classrooms = 100;       // Number of classrooms per school
-
-int n_asym = 0;//mult*100;            // Initial number of asymptomatics
-int n_rec  = 0;//mult*3000;            // Initial number of asymptomatics
-
-double initial_asymptomatic_fraction = 1.00/100;
-double initial_recovered_fraction    = 30.0/100;
-double initial_vaccinated_fraction   = 20.0/100;
-
-const int maxppl = 10000;        // Maximum number of people who can be linked to a location (to avoid 2GB limit on arrays) [Not needed anymore]
-
-char states[][3] = {"S","E", "A","P", "MI","SI","R","H", "D"};
-                  // 0   1    2    3   4    5    6   7    8
-
-const int S = 0;
-const int E = 1;
-const int A = 2;
-const int P = 3;
-const int MI= 4;
-const int SI= 5;
-const int R = 6;
-const int H = 7;
-const int D = 8;
-
-const int s = 0;   // Index of "state" attribute
-
-const int a = 1;   // Index of "age" attribute
-const int x = 2;   // Index of "some factor" attribute
-
-
-const int h = 3;   // Index of "home loc" attribute
-const int w = 4;   // Index of "work loc" attribute
-const int c = 5;   // Index of "current loc" attribute
-
-const int n_states = sizeof(states)/sizeof(states[0]); // Number of states
-
-const int person_attr = 6;     // Number of attributes in the pop array (currently: state, age, "something", home location, work location, currently location)
-const int max_age     = 9;
-
-double Cpars[] = {1,  1,   1,    1,   0.1,  0.1}; // Contact parameters for transmission
-               // SA  SP  S-MI  S-SI  S-H   S-Q
-
-/* Initial populations ***************************/
-
-int n[n_states];// {n_pop-n_asym, n_asym, 0, 0,  0,  0, 0 };
-                     // [S,        A,    P, MI, SI, R, H ]
- int n_per_age[max_age][n_states];//   // NEW, for age-stratification
-
-
-/*************************************************/
-
-int total_loc_confined_time = 14;
-int total_isolation_time    = 14;
-int if_positive_test_after  = 14;
-
-int days_bw_hq_tests = 0;
-int days_bw_lq_tests = 0;
-
-double rate[max_age][n_states][n_states] = {};
-// double age_factor[max_age][n_states] = {};
-
-int pop[n_pop][person_attr] = { };
-int n_per_location[n_loc][n_states];
-
-vector<vector<int>> people_linked_to(n_loc);
-int len_ppl_linked_to[n_loc] = {};
-
-vector<vector<vector<int>>> n_per_room(n_loc);
-bool is_school[n_loc] = {};
-int n_rooms[n_loc] = {};
-
-
-// New vaccination arrays
-bool is_vaccinated[n_pop] = {};
-int vaccinated_on[n_pop] = {};
-int vaccs_per_state[n_states] = {}; // NEW: Remove quick?
-int vaccines_administered = 0;
-int agewise_vaccines_administered[max_age] = {};
-
-int current_room[n_pop] = {};
-int assigned_room[n_pop]={};
-bool is_adult[n_pop]={};
-
-// New variables for vaccinated //
-
-double infection_reduction       = 1.0 - 0.441;
-double gamma_fractional_increase = 1.0 - 0.598;
-double transmission_reduction    = 0.4;
-
-int vaccination_strategy = 0;
-int ascending = 1;
-int descending=-1;
-// int vaccines_administered = 0;
-
-double unlockSchoolsAt = 100;
-double dvr = 0.0;
-
-//*****************************//
-
-
-bool quarantine_confined = true;                   // Change to false if you don't want to confine individuals who've tested positive
-bool lock_schools = true;                          // NEW: Don't allow people to go to schools. Default: true (start schools locked)
-bool shuffle_teachers = false;                     // NEW: Variable that decides whether teachers move between classrooms. Default: false (don't let them move.)
-
-const int op_width = 1 + n_states + 3 + 2 + 1 + 1 + 1;     // Width of output array: <time>(1) <Number of states> <Testing details>(3) <Home quarantine details>(3)
-const int age_op_width = 1 + (n_states+2)*max_age;         // Width of age-wise output array <time>(1) (<Number of states> <Vaccines administered> <Background Seropositivity> ) x max_age
-int positives = 0;
-/*****************************************************************/
-
-/* Other functions ***********************************************/
-
-int sum(int array[],int len){
-
-  int sum = 0;
-
-  for(int i =0; i<len;i++){
-    sum += array[i];
-  }
-
-  return sum;
-}
-
-int sum(bool array[],int len){
-
-  int sum = 0;
-
-  for(int i =0; i<len;i++){
-    sum += array[i];
-  }
-
-  return sum;
-}
-
-
-double sum(double array[],int len){
-
-  double sum = 0;
-
-  for(int i =0; i<len;i++){
-    sum += array[i];
-  }
-
-  return sum;
-}
-
-int sum(int array[][n_states], const int len, int axis){
-
-  int sum = 0;
-
-  for(int i =0; i<len;i++){
-    sum += array[i][axis];
-  }
-
-  return sum;
-}
-
 
 void shuffle(int start, int end, int *array)
 {
@@ -247,16 +58,171 @@ void shuffle(int start, int end, vector<int> array)
     }
 }
 
+
+/*****************************************************************/
+
+
+/* Global variables **********************************************/
+
+/*
+Below are certain parameters used by the code. They are divided into three sections:
+1. User defined parameters: users can change these as they see fit. These decide the
+   population size, the initial conditions of the code, contact parameters, vaccination
+   parameters and so on.
+
+2. Constants used by the code: These are set constants that the code requires to run.
+   Changing any of these values will either break the code or make it run unpredictably.
+   Do not edit them unless you know what you're doing.
+
+3. Variables set during runtime: These are variables that will be reset every run, and
+   are initialised globally for ease-of-access. There is no need to edit them.
+*/
+
+// *****************************************************************//
+// ****************** 1. USER DEFINED VARIABLES ********************//
+// *****************************************************************//
+
+double dt = 0.1;
+char output_folder[100] = "tmp";
+bool print_log = true;
+
+const int mult = 1;              // Multiplier to scale up problem (1: n_pop = 1 x 10,000, 2: n_pop = 20,000, etc.)
+
+const int n_pop = mult*20316;    // Total population
+const int n_loc = mult*6623;     // Total number of locations
+const int n_net = mult*123;      // Total number of networks
+const int n_hospitals = mult*1;  // Set the number of hospitals.
+
+const int start_schools = n_hospitals; // Where school locations start
+const int n_schools = mult*1;          // Set the number of schools (1)
+
+const int classrooms = 100;            // Number of classrooms per school
+
+double initial_asymptomatic_fraction = 1.00/100; // Initial fraction of asymptomatic
+double initial_recovered_fraction    = 30.0/100; // Initial fraction of recovered
+double initial_vaccinated_fraction   = 20.0/100; // Initial fraction of vaccinated
+
+
+double Cpars[] = {1,  1,   1,    1,   0.1,  0.1}; // Contact parameters for transmission
+               // SA  SP  S-MI  S-SI  S-H   S-Q
+
+/* Testing parameters *********************/
+
+bool quarantine_confined = true;                  // Change to false if you don't want to confine individuals who've tested positive
+
+int total_loc_confined_time = 14;
+int total_isolation_time    = 14;
+int if_positive_test_after  = 14;
+
+int days_bw_hq_tests = 0;
+int days_bw_lq_tests = 0;
+
+
+/* Vaccination parameters ********************/
+
+double dvr = 0.0;
+double infection_reduction       = 1.0 - 0.441;
+double gamma_fractional_increase = 1.0 - 0.598;
+double transmission_reduction    = 0.4;
+
+int vaccination_strategy = 0;  // Can be 0 (unset), ascending (1), or descending (-1)
+
+/* School parameters *************************/
+
+double unlockSchoolsAt = 100;
+bool start_with_schools_locked = true;          // Don't allow people to go to schools. Default: true (start schools locked)
+bool shuffle_teachers = false;                  // Allow teachers move between classrooms. Default: false (don't let them move)
+
+
+// *****************************************************************//
+// ****************** 2. CONSTANTS USED BY CODE ********************//
+// *****************************************************************//
+
+const char states[][3] = {"S","E", "A","P", "MI","SI","R","H", "D"};
+                        // 0   1    2    3   4    5    6   7    8
+const int n_states = sizeof(states)/sizeof(states[0]); // Number of states
+
+const int S = 0;
+const int E = 1;
+const int A = 2;
+const int P = 3;
+const int MI= 4;
+const int SI= 5;
+const int R = 6;
+const int H = 7;
+const int D = 8;
+
+const int person_attr = 6;  // Number of attributes a person can be assigned in the pop array (state, age, "something", home location, work location, currently location)
+
+const int s = 0;   // Index of "state" attribute
+
+const int a = 1;   // Index of "age" attribute
+const int x = 2;   // Index of "some factor" attribute
+
+const int h = 3;   // Index of "home loc" attribute
+const int w = 4;   // Index of "work loc" attribute
+const int c = 5;   // Index of "current loc" attribute
+
+const int max_age     = 9;
+
+const int ascending = 1;       // Possible vaccination strategy (ascending)
+const int descending=-1;       // Possible vaccination strategy (descending)
+
+const int op_width = 1 + n_states + 3 + 2 + 1 + 1 + 1;// Width of output array: <time>(1) <Number of states> <Testing details>(3) <Home quarantine details>(3)
+const int age_op_width = 1 + (n_states+2)*max_age;    // Width of age-wise output array <time>(1) (<Number of states> <Vaccines administered> <Background Seropositivity> ) x max_age
+
+
+// *****************************************************************//
+// ************** 3. VARIABLES SET DURING RUN-TIME *****************//
+// *****************************************************************//
+
+double rate[max_age][n_states][n_states] = {};
+int positives = 0;   // To store: number of positive test results
+int n_asym = 0;      // To store: initial number of asymptomatics
+int n_rec  = 0;      // To store: initial number of recovered
+
+/* Population arrays ******************************/
+
+int pop[n_pop][person_attr] = {};
+
+int n[n_states];
+int n_per_location[n_loc][n_states];
+int n_per_age[max_age][n_states];
+
+bool is_adult[n_pop]     = {};
+
+
+/* Location arrays *******************************/
+
+vector<vector<int>> people_linked_to(n_loc);
+int len_ppl_linked_to[n_loc] = {};
+
+vector<vector<vector<int>>> n_per_room(n_loc);
+bool is_school[n_loc] = {};
+int n_rooms[n_loc]    = {};
+
+int current_room[n_pop]  = {};
+int assigned_room[n_pop] = {};
+
+/* Vaccination arrays ***************************/
+
+bool is_vaccinated[n_pop] = {};
+int vaccinated_on[n_pop] = {};
+int vaccs_per_state[n_states] = {};
+
+int vaccines_administered = 0;
+int agewise_vaccines_administered[max_age] = {};
+
+
 /*****************************************************************/
 
 
 void readcsv(char *filename)
 {
 int num_to_prevaccinate = (int)(initial_vaccinated_fraction*n_pop);
-// printf("Number to prevacc at start %i\n",num_to_prevaccinate );
 
 FILE* fp = fopen(filename, "rt");
-if (fp==NULL) {printf("no such file\n");exit(0);}
+if (fp==NULL) {printf("No file with name %s!\n",filename);exit(2);}
 
 char *buffer,*tofree,*value;
 
@@ -266,6 +232,7 @@ int column = 0;
 while (row<n_pop)
 	{
 	tofree=buffer=(char *)malloc(1024*sizeof(char));
+
 	if (fgets(buffer,1024, fp)==NULL) {printf("End of file reached, only %d rows read\n",row);}
 
 	column = 0;
@@ -278,16 +245,16 @@ while (row<n_pop)
       pop[row][column] = atoi(value);
       if(column==a){pop[row][column] = (int)pop[row][column]/10;} // If the column is the age, divide it by 10 to get to the decade
 
-      if(column==s){                                              // Setting initial states
-        double r = uniform();
+      if(column==s){                                              // If the column is the state, set the initial state
+        double r = uniform();                                     // Random number to decide initial state of agents
         if(r<initial_asymptomatic_fraction){pop[row][column] = A; n_asym++;}
         else if(r>initial_asymptomatic_fraction && r<initial_asymptomatic_fraction+initial_recovered_fraction){ pop[row][column]=R; n_rec++;}
         else{pop[row][column] = S;}
       }
-
 		column++;
 		}
 
+    // Prevaccinate 80% of the 60+ individuals
     is_vaccinated[row] = (num_to_prevaccinate>0 && pop[row][a] >= 6 && uniform()<0.8) ? true : false;
     vaccinated_on[row] = is_vaccinated[row] ? -1000 : 1000;
     if(is_vaccinated[row]){
@@ -297,19 +264,22 @@ while (row<n_pop)
       vaccines_administered++;
     }
 
-    n_per_location[pop[row][c]][pop[row][s]] += 1;  // Increment number of disease-state in current location
-    n_per_age     [pop[row][a]][pop[row][s]] += 1;  // Increment number of disease state per age
-
-    if(pop[row][a]>1){is_adult[row] = true;}
-
+    int state       = pop[row][s];
+    int age         = pop[row][a];
     int work_loc    = pop[row][w];
     int current_loc = pop[row][c];
 
+
+
+    n_per_location[current_loc][state] += 1;  // Increment number of disease-state in current location
+    n_per_age[age][state]              += 1;  // Increment number of disease state per age
+
+    if(age>1){is_adult[row] = true;}
+
     assigned_room[row] = randint(n_rooms[work_loc]);
     current_room[row]  = 0;
-    // printf("loc %i rooms %i assigned %i\n",work_loc, n_rooms[work_loc], assigned_room[row] );
 
-    n_per_room[current_loc][current_room[row]][pop[row][s]] += 1; // Increase number of current state in current room of current location
+    n_per_room[current_loc][current_room[row]][state] += 1; // Increase number of current state in current room of current location
 
 	row++;
 
@@ -317,11 +287,11 @@ while (row<n_pop)
 	}
 
   //*********** Prevaccinate randomly if any doses are left ********//
-  // printf("Num to prevacc before random %i\n", num_to_prevaccinate);
-  while(num_to_prevaccinate>0){
-    int p = randint(n_pop);
-    if(!is_vaccinated[p]){
-      is_vaccinated[p] = is_adult[p] ? true : false;
+
+  while(num_to_prevaccinate>0){                            // While "pre"vaccines are still available
+    int p = randint(n_pop);                                // Choose a person at random
+    if(!is_vaccinated[p]){                                 // If they have not been vaccinated
+      is_vaccinated[p] = is_adult[p] ? true : false;       // and are adults, vaccinate them
       vaccinated_on[p] = is_vaccinated[p] ? -1000 : 1000;
       if(is_vaccinated[p]){
         num_to_prevaccinate--;
@@ -331,12 +301,12 @@ while (row<n_pop)
       }
     }
   }
-  // printf("Num to prevacc after random %i, vaccs administered %i\n", num_to_prevaccinate,vaccines_administered);
+
   //************ Done prevaccinating *********************************//
 
 fclose(fp);
 
-//***** CREATE PEOPLE-LINKED-TO ARRAY ***************************************************//
+//***** CREATE ARRAY OF PEOPLE-LINKED-TO LOCATION ***************************************************//
 
 for(int i=0;i<n_loc;i++){
   people_linked_to[i] = vector<int>();          // Empty vector for each location
@@ -352,7 +322,7 @@ for(int i=0;i<n_loc;i++){
   len_ppl_linked_to[i] = counter;               // Array containing the total number of people linked to each location
 }
 
-//***** DONE CREATING PEOPLE-LINKED-TO ARRAY ********************************************//
+//***** DONE CREATING ARRAY OF PEOPLE-LINKED-TO LOCATION ********************************************//
 
 
 
@@ -379,6 +349,7 @@ void createPopulation(char *filename){
   n_asym = 0;
   n_rec  = 0;
   vaccines_administered = 0;
+
   for(int age=0;age<max_age;age++){agewise_vaccines_administered[age]=0;}
 
   // *************************************************//
@@ -386,7 +357,6 @@ void createPopulation(char *filename){
   // *************************************************//
 
   // Assign rooms to each location, and initialise the n_per_room vector.
-  // Create a people_linked_to list of all people associated with a location (either as work or home).
   // Reset all classroom numbers
 
   for(int i=0; i<n_loc;i++){
@@ -394,19 +364,18 @@ void createPopulation(char *filename){
     // Reset n_per_location
     for(int j=0;j<n_states;j++){n_per_location[i][j]=0;}
 
-    // Deciding if a location is a school or not
+    // Decide if a location is a school or not
     if(i<start_schools+n_schools && i>=start_schools){
       is_school[i] = true;
     }
     else{ is_school[i] = false; }
 
     // Assigning quantities per room:
-
-    if(!is_school[i]){ n_rooms[i] = 1;} else{ n_rooms[i] = classrooms;}  // If it's not a school, assign only 1 room, else assign `classroom` rooms.
+    if(!is_school[i]){ n_rooms[i] = 1;} else{ n_rooms[i] = classrooms;}  // If it's not a school, assign only 1 room, else assign `classrooms` rooms.
 
     n_per_room[i] = vector<vector<int>>(n_rooms[i]);
-    for(int room=0; room<n_rooms[i];room++){        // For each room in locations
-      n_per_room[i][room] = vector<int>(n_states,0);// assign a vector which -- for each room -- contains the number of individuals per state
+    for(int room=0; room<n_rooms[i];room++){          // For each room in locations
+      n_per_room[i][room] = vector<int>(n_states,0);  // assign a vector which -- for each room -- contains the number of individuals per state
     }
   }
 
@@ -423,10 +392,7 @@ void createPopulation(char *filename){
   // **************** PERSON SETUP *******************//
   // *************************************************//
 
-  // Todo: Read from CSV here
-
   readcsv(filename);
-
 
   // *************************************************//
   // **************** PRINT POPULATION ***************//
@@ -447,50 +413,50 @@ void createPopulation(char *filename){
 char outputFilename[1000];
 void writetofile(int output[][op_width], int age_output[][age_op_width], int tf, double Tpars[2][4], double begin_at, double test_frac, double time_taken, int details[9],int iter){
   // FOR REFERENCE: int details[] = {quarantine_confined, lock_homes, quarantine_when_sample_taken, lq_tests_conducted, hq_tests_conducted, tests_conducted, results_declared, locations_moved, hcw_recovered};
-  // Write output to a FILE
+
+  // Write output to a file
+
   errno = 0;      // Variable to store error number in case file open does not work
 
-  // sprintf(outputFilename,"./%s/output/Targeted_BeginAt_%g_DTR_%g_RAT_%g_%g_PCR_%g_%g_%lf%lf-%i.txt",names[iter],begin_at,test_frac,Tpars[0][0],Tpars[0][3],Tpars[1][0],Tpars[1][3],uniform(),uniform(),iter);
   double rn1 = uniform();
   double rn2 = uniform();
-
-  // printf("./%s/VR_%g_%s_UnlockSchoolsAt_%g_%lf%lf-%i.txt",output_folder,dvr,vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset",unlockSchoolsAt,rn1,rn2,iter);
 
   sprintf(outputFilename,"./%s/Total_IR_%g_IV_%g_VR_%g_%s_UnlockSchoolsAt_%g_%lf%lf-%i.txt",output_folder,initial_recovered_fraction*100, initial_vaccinated_fraction*100, dvr,vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset",unlockSchoolsAt,rn1,rn2,iter);
   FILE *fpt=(FILE *)fopen(outputFilename,"wt"); // Open the file to print output
 
   if(fpt){
+    if(print_log){
+      fprintf(fpt,"###### TEST LOG ####################\n");
+      fprintf(fpt,"# Time taken               : %.2f s\n",time_taken);
 
-    fprintf(fpt,"###### TEST LOG ####################\n");
-    fprintf(fpt,"# Time taken               : %.2f s\n",time_taken);
+      fprintf(fpt,"# Test Parameters: \n");
+      fprintf(fpt,"# %.2f %.2f %.2f %.2f\n", Tpars[0][0], Tpars[0][1], Tpars[0][2], Tpars[0][3]);
+      fprintf(fpt,"# %.2f %.2f %.2f %.2f\n", Tpars[1][0], Tpars[1][1], Tpars[1][2], Tpars[1][3]);
 
-    fprintf(fpt,"# Test Parameters: \n");
-    fprintf(fpt,"# %.2f %.2f %.2f %.2f\n", Tpars[0][0], Tpars[0][1], Tpars[0][2], Tpars[0][3]);
-    fprintf(fpt,"# %.2f %.2f %.2f %.2f\n", Tpars[1][0], Tpars[1][1], Tpars[1][2], Tpars[1][3]);
+      fprintf(fpt,"# Confined Less Infective? : %s\n", details[0] ? "True": "False");
+      fprintf(fpt,"# Homes Quarantined?       : %s\n", details[1] ? "True": "False");
+      fprintf(fpt,"# Quarantine when sampled? : %s\n", details[2] ? "True": "False");
+      fprintf(fpt,"# Testing Started When     : %.2f%% recovered\n", begin_at);
+      fprintf(fpt,"# Fraction Tested Daily    : %.2f%%\n", test_frac);
 
-    fprintf(fpt,"# Confined Less Infective? : %s\n", details[0] ? "True": "False");
-    fprintf(fpt,"# Homes Quarantined?       : %s\n", details[1] ? "True": "False");
-    fprintf(fpt,"# Quarantine when sampled? : %s\n", details[2] ? "True": "False");
-    fprintf(fpt,"# Testing Started When     : %.2f%% recovered\n", begin_at);
-    fprintf(fpt,"# Fraction Tested Daily    : %.2f%%\n", test_frac);
+      fprintf(fpt,"# LQ Tests Done in total   : %d\n", details[3]);
+      fprintf(fpt,"# HQ Tests Done in total   : %d\n", details[4]);
+      fprintf(fpt,"# All Tests Done in total  : %d\n", details[5]);
+      fprintf(fpt,"# Results Given in total   : %d\n", details[6]);
+      fprintf(fpt,"# Locations Moved in total : %d\n", details[7]);
+      fprintf(fpt,"# Total recovered HCW      : %d\n", details[8]);
+      fprintf(fpt,"# Total HCW                : %d\n", details[9]);
 
-    fprintf(fpt,"# LQ Tests Done in total   : %d\n", details[3]);
-    fprintf(fpt,"# HQ Tests Done in total   : %d\n", details[4]);
-    fprintf(fpt,"# All Tests Done in total  : %d\n", details[5]);
-    fprintf(fpt,"# Results Given in total   : %d\n", details[6]);
-    fprintf(fpt,"# Locations Moved in total : %d\n", details[7]);
-    fprintf(fpt,"# Total recovered HCW      : %d\n", details[8]);
-    fprintf(fpt,"# Total HCW                : %d\n", details[9]);
+      fprintf(fpt,"# Vaccination strategy     : %s\n", vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset");
+      fprintf(fpt,"# Total Vaccines Given     : %d\n", vaccines_administered);
+      fprintf(fpt,"# Schools unlocked on day  : %g\n", unlockSchoolsAt);
 
-    fprintf(fpt,"# Vaccination strategy     : %s\n", vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset");
-    fprintf(fpt,"# Total Vaccines Given     : %d\n", vaccines_administered);
-    fprintf(fpt,"# Schools unlocked on day  : %g\n", unlockSchoolsAt);
-
-    fprintf(fpt,"# Rate Array: \n");
-    for(int i=0; i<n_states;i++){fprintf(fpt,"# ");for(int j=0; j<n_states;j++){fprintf(fpt,"%5g ", rate[0][i][j]);}fprintf(fpt,"\n");}// NOTE! : Change to correct rates
-    fprintf(fpt,"###### END LOG #####################\n");
-    fprintf(fpt,"#\n");
-    fprintf(fpt, "#%s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s\n","Day","nS","nE","nA","nP","nMI","nSI","nR","nH","nD","nV","nBS","PCR_conducted_today", "RAT_conducted_today", "Tests_remaining_today", "Agents_currently_confined", "Quarantines_removed_today","Locations_in_quarantine_today" );
+      fprintf(fpt,"# Rate Array: \n");
+      for(int i=0; i<n_states;i++){fprintf(fpt,"# ");for(int j=0; j<n_states;j++){fprintf(fpt,"%5g ", rate[0][i][j]);}fprintf(fpt,"\n");}// NOTE! : Change to correct rates
+      fprintf(fpt,"###### END LOG #####################\n");
+      fprintf(fpt,"#\n");
+      fprintf(fpt, "#%s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s\n","Day","nS","nE","nA","nP","nMI","nSI","nR","nH","nD","nV","nBS","PCR_conducted_today", "RAT_conducted_today", "Tests_remaining_today", "Agents_currently_confined", "Quarantines_removed_today","Locations_in_quarantine_today" );
+    }
 
     for(int i=0;i<tf;i++){
       for(int j=0; j<op_width;j++){
@@ -507,52 +473,52 @@ void writetofile(int output[][op_width], int age_output[][age_op_width], int tf,
   errno = 0;      // Variable to store error number in case file open does not work
   char ageOutputFilename[1000];
 
-  // sprintf(ageOutputFilename,"./%s/output/AgeStratified_BeginAt_%g_DTR_%g_RAT_%g_%g_PCR_%g_%g_%lf%lf-%i.txt",names[iter],begin_at,test_frac,Tpars[0][0],Tpars[0][3],Tpars[1][0],Tpars[1][3],uniform(),uniform(),iter);
   sprintf(ageOutputFilename,"./%s/AgeStratified_IR_%g_IV_%g_VR_%g_%s_UnlockSchoolsAt_%g_%lf%lf-%i.txt",output_folder,initial_recovered_fraction*100, initial_vaccinated_fraction*100, dvr,vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset",unlockSchoolsAt,rn1,rn2,iter);
   FILE *fpt1=(FILE *)fopen(ageOutputFilename,"wt"); // Open the file to print output
 
   if(fpt){
+    if(print_log){
+      fprintf(fpt1,"###### TEST LOG ####################\n");
+      fprintf(fpt1,"# Time taken               : %.2f s\n",time_taken);
+      fprintf(fpt1,"# Main file                : %s \n",outputFilename);
 
-    fprintf(fpt1,"###### TEST LOG ####################\n");
-    fprintf(fpt1,"# Time taken               : %.2f s\n",time_taken);
-    fprintf(fpt1,"# Main file                : %s \n",outputFilename);
+      fprintf(fpt1,"# Test Parameters: \n");
+      fprintf(fpt1,"# %.2f %.2f %.2f %.2f\n", Tpars[0][0], Tpars[0][1], Tpars[0][2], Tpars[0][3]);
+      fprintf(fpt1,"# %.2f %.2f %.2f %.2f\n", Tpars[1][0], Tpars[1][1], Tpars[1][2], Tpars[1][3]);
 
-    fprintf(fpt1,"# Test Parameters: \n");
-    fprintf(fpt1,"# %.2f %.2f %.2f %.2f\n", Tpars[0][0], Tpars[0][1], Tpars[0][2], Tpars[0][3]);
-    fprintf(fpt1,"# %.2f %.2f %.2f %.2f\n", Tpars[1][0], Tpars[1][1], Tpars[1][2], Tpars[1][3]);
+      fprintf(fpt1,"# Confined Less Infective? : %s\n", details[0] ? "True": "False");
+      fprintf(fpt1,"# Homes Quarantined?       : %s\n", details[1] ? "True": "False");
+      fprintf(fpt1,"# Quarantine when sampled? : %s\n", details[2] ? "True": "False");
+      fprintf(fpt1,"# Testing Started When     : %.2f%% recovered\n", begin_at);
+      fprintf(fpt1,"# Fraction Tested Daily    : %.2f%%\n", test_frac);
 
-    fprintf(fpt1,"# Confined Less Infective? : %s\n", details[0] ? "True": "False");
-    fprintf(fpt1,"# Homes Quarantined?       : %s\n", details[1] ? "True": "False");
-    fprintf(fpt1,"# Quarantine when sampled? : %s\n", details[2] ? "True": "False");
-    fprintf(fpt1,"# Testing Started When     : %.2f%% recovered\n", begin_at);
-    fprintf(fpt1,"# Fraction Tested Daily    : %.2f%%\n", test_frac);
+      fprintf(fpt1,"# LQ Tests Done in total   : %d\n", details[3]);
+      fprintf(fpt1,"# HQ Tests Done in total   : %d\n", details[4]);
+      fprintf(fpt1,"# All Tests Done in total  : %d\n", details[5]);
+      fprintf(fpt1,"# Results Given in total   : %d\n", details[6]);
+      fprintf(fpt1,"# Locations Moved in total : %d\n", details[7]);
+      fprintf(fpt1,"# Total recovered HCW      : %d\n", details[8]);
+      fprintf(fpt1,"# Total HCW                : %d\n", details[9]);
 
-    fprintf(fpt1,"# LQ Tests Done in total   : %d\n", details[3]);
-    fprintf(fpt1,"# HQ Tests Done in total   : %d\n", details[4]);
-    fprintf(fpt1,"# All Tests Done in total  : %d\n", details[5]);
-    fprintf(fpt1,"# Results Given in total   : %d\n", details[6]);
-    fprintf(fpt1,"# Locations Moved in total : %d\n", details[7]);
-    fprintf(fpt1,"# Total recovered HCW      : %d\n", details[8]);
-    fprintf(fpt1,"# Total HCW                : %d\n", details[9]);
+      fprintf(fpt,"# Vaccination strategy     : %s\n", vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset");
+      fprintf(fpt,"# Total Vaccines Given     : %d\n", vaccines_administered);
+      fprintf(fpt,"# Schools unlocked on day  : %g\n", unlockSchoolsAt);
 
-    fprintf(fpt,"# Vaccination strategy     : %s\n", vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset");
-    fprintf(fpt,"# Total Vaccines Given     : %d\n", vaccines_administered);
-    fprintf(fpt,"# Schools unlocked on day  : %g\n", unlockSchoolsAt);
+      fprintf(fpt1,"# Rate Array: \n");
+      for(int i=0; i<n_states;i++){fprintf(fpt1,"# ");for(int j=0; j<n_states;j++){fprintf(fpt1,"%5g ", rate[0][i][j]);}fprintf(fpt1,"\n");}// NOTE! : Change to correct rates
+      fprintf(fpt1,"###### END LOG #####################\n");
+      fprintf(fpt1,"#\n");
 
-    fprintf(fpt1,"# Rate Array: \n");
-    for(int i=0; i<n_states;i++){fprintf(fpt1,"# ");for(int j=0; j<n_states;j++){fprintf(fpt1,"%5g ", rate[0][i][j]);}fprintf(fpt1,"\n");}// NOTE! : Change to correct rates
-    fprintf(fpt1,"###### END LOG #####################\n");
-    fprintf(fpt1,"#\n");
-    // fprintf(fpt, "# %s %s %s %s %s %s %s %s %s %s %s %s %s %s\n","Day","nS","nA","nP","nMI","nSI","nR","nH","PCR_conducted_today", "RAT_conducted_today", "Tests_remaining_today", "Agents_currently_confined", "Quarantines_removed_today","Locations_in_quarantine_today" );
-    fprintf(fpt1, "#Day ");
-    for(int j=0;j<max_age;j++){
-      for(int i=0;i<n_states;i++){
-        fprintf(fpt1, "%s%i ",states[i],(j+1)*10);
+      fprintf(fpt1, "#Day ");
+      for(int j=0;j<max_age;j++){
+        for(int i=0;i<n_states;i++){
+          fprintf(fpt1, "%s%i ",states[i],(j+1)*10);
+        }
+        fprintf(fpt1, "%s%i ","V",(j+1)*10);
+        fprintf(fpt1, "%s%i ","BS",(j+1)*10);
       }
-      fprintf(fpt1, "%s%i ","V",(j+1)*10);
-      fprintf(fpt1, "%s%i ","BS",(j+1)*10);
+      fprintf(fpt1,"\n");
     }
-    fprintf(fpt1,"\n");
 
     for(int i=0;i<tf;i++){
       for(int j=0; j<(n_states+2)*max_age + 1;j++){
@@ -569,7 +535,7 @@ void writetofile(int output[][op_width], int age_output[][age_op_width], int tf,
 }
 
 
-void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample_taken, double begin_at, double test_frac, double start_vacc, double dvr, double unlockSchoolsAt, int iter){
+void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample_taken, double begin_at, double test_frac, double start_vacc, double dvr, double unlockSchoolsAt, int iter){
 
   clock_t start, end; // Measuring how long the function takes to run
   double cpu_time_used;
@@ -579,13 +545,9 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
   bool being_tested[n_pop] = {};
   bool loc_confined[n_loc] = {};
 
-  // New school array
-  // bool is_school[n_loc] = {};
-  // for(int i=start_schools;i<start_schools+n_schools;i++){is_school[i]=true;}
-
   //* Added to keep track of retesting RAT negative symptomatics **//
   int last_test_type[n_pop]={};
-  std::fill_n(last_test_type,n_pop,-1000);  // Set all values of last_test_type to -1000
+  std::fill_n(last_test_type,n_pop,-1000);    // Set all values of last_test_type to -1000
   int last_test_result[n_pop]={};
   std::fill_n(last_test_result,n_pop,-1000);  // Set all values of last_test_result to -1000
   /*****************************************************************/
@@ -614,7 +576,7 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
   double alphaH = 1 - Cpars[4];                           // Quantity by which V is reduced per hospitalised individual
   double alphaQ = 1 - Cpars[5];
 
-  double alphaT = 1 - transmission_reduction;             // NEW: effective reduction in number of people in location due to vaccination
+  double alphaT = 1 - transmission_reduction;             // Effective reduction in transmission per person due to vaccination
 
   int tests_available_daily = test_frac/100 * n_pop;
   int tests_remaining_today = test_frac/100 * n_pop;
@@ -641,10 +603,10 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
   bool second_move_done=false;
   bool third_move_done =false;
 
-  bool lock_schools = true; //NEW: Start with schools always locked!
+  bool lock_schools = start_with_schools_locked; //Reset schools to start off locked
 
-  int output[tf+1][op_width];   // Output array, to be printed to file
-  int age_output[tf+1][age_op_width]; // NEW: to print out output per age
+  int output[tf+1][op_width];         // Output array, to be printed to file
+  int age_output[tf+1][age_op_width]; // Output array per age
 
 
   // Computing Background Seropositivity **************************************//
@@ -680,7 +642,6 @@ void Targeted_Run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_wh
 
     if(t>unlockSchoolsAt && lock_schools==true){  // Check if schools need to be unlocked
       lock_schools=false;
-      printf("Schools unlocked at t=%.2f\n",t);
     }
 
 
@@ -1642,16 +1603,16 @@ int main() {
         createPopulation(filename);              // Create a random population with a fixed infection seed (default: 1%) and recovered fraction (default: 30%), set by initial_asymptomatic_fraction
                                                  // Resets the pop array, n_per_location array, and people_linked_to array.
 
-        Targeted_Run(Tpars,
-                     tf,
-                     lock_homes,
-                     quarantine_when_sample_taken,
-                     begin_at,
-                     test_frac,
-                     0.0, //<-- Start vacc at
-                     dvr,
-                     unlockSchoolsAt,//<-- unlockSchoolsAt
-                     0);
+        run(Tpars,
+             tf,
+             lock_homes,
+             quarantine_when_sample_taken,
+             begin_at,
+             test_frac,
+             0.0, //<-- Start vacc at
+             dvr,
+             unlockSchoolsAt,//<-- unlockSchoolsAt
+             0);
        }
     }
 
