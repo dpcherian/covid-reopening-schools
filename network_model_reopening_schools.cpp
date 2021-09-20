@@ -1,4 +1,3 @@
-//Including age stratification and schools
 #include <iostream>
 #include <stdio.h>
 #include <random>
@@ -8,7 +7,6 @@
 #include <array>
 #include <stdlib.h>
 #include <string.h>
-
 
 using namespace std;
 
@@ -103,20 +101,8 @@ double initial_recovered_fraction    = 30.0/100; // Initial fraction of recovere
 double initial_vaccinated_fraction   = 20.0/100; // Initial fraction of vaccinated
 
 
-double Cpars[] = {1,  1,   1,    1,   0.1,  0.1}; // Contact parameters for transmission
-               // SA  SP  S-MI  S-SI  S-H   S-Q
-
-/* Testing parameters *********************/
-
-bool quarantine_confined = true;                  // Change to false if you don't want to confine individuals who've tested positive
-
-int total_loc_confined_time = 14;
-int total_isolation_time    = 14;
-int if_positive_test_after  = 14;
-
-int days_bw_hq_tests = 0;
-int days_bw_lq_tests = 0;
-
+double Cpars[] = {1,  1,   1,    1,   0.1}; // Contact parameters for transmission
+               // SA  SP  S-MI  S-SI  S-H
 
 /* Vaccination parameters ********************/
 
@@ -167,11 +153,12 @@ const int w = 4;   // Index of "work loc" attribute
 const int c = 5;   // Index of "current loc" attribute
 
 const int max_age     = 9;
+const int min_adult_age=2;
 
 const int ascending = 1;       // Possible vaccination strategy (ascending)
 const int descending=-1;       // Possible vaccination strategy (descending)
 
-const int op_width = 1 + n_states + 3 + 2 + 1 + 1 + 1;// Width of output array: <time>(1) <Number of states> <Testing details>(3) <Home quarantine details>(3)
+const int op_width = 1 + n_states + 2;                // Width of output array: <time>(1) <Number of states> <Vaccines Administered> <Background Seropositivity>
 const int age_op_width = 1 + (n_states+2)*max_age;    // Width of age-wise output array <time>(1) (<Number of states> <Vaccines administered> <Background Seropositivity> ) x max_age
 
 
@@ -180,7 +167,6 @@ const int age_op_width = 1 + (n_states+2)*max_age;    // Width of age-wise outpu
 // *****************************************************************//
 
 double rate[max_age][n_states][n_states] = {};
-int positives = 0;   // To store: number of positive test results
 int n_asym = 0;      // To store: initial number of asymptomatics
 int n_rec  = 0;      // To store: initial number of recovered
 
@@ -219,7 +205,7 @@ int vaccines_administered = 0;
 int agewise_vaccines_administered[max_age] = {};
 
 
-/*****************************************************************/
+/************************************************/
 
 
 void readcsv(char *filename)
@@ -279,7 +265,7 @@ while (row<n_pop)
     n_per_location[current_loc][state] += 1;  // Increment number of disease-state in current location
     n_per_age[age][state]              += 1;  // Increment number of disease state per age
 
-    if(age>1){is_adult[row] = true;}
+    if(age>=min_adult_age){is_adult[row] = true;}
 
     assigned_room[row] = randint(n_rooms[work_loc]);
     current_room[row]  = 0;
@@ -328,7 +314,6 @@ for(int i=0;i<n_loc;i++){
 }
 
 //***** DONE CREATING ARRAY OF PEOPLE-LINKED-TO LOCATION ********************************************//
-
 
 
 //***** CREATE n ARRAY *************************************//
@@ -416,8 +401,8 @@ void createPopulation(char *filename){
 
 
 char outputFilename[1000];
-void writetofile(int output[][op_width], int age_output[][age_op_width], int tf, double Tpars[2][4], double begin_at, double test_frac, double time_taken, int details[9],int iter){
-  // FOR REFERENCE: int details[] = {quarantine_confined, lock_homes, quarantine_when_sample_taken, lq_tests_conducted, hq_tests_conducted, tests_conducted, results_declared, locations_moved, hcw_recovered};
+void writetofile(int output[][op_width], int age_output[][age_op_width], int tf, double time_taken, int details[9],int iter){
+  // FOR REFERENCE: int details[] = {locations_moved, hcw_recovered, hcw};
 
   // Write output to a file
 
@@ -426,41 +411,26 @@ void writetofile(int output[][op_width], int age_output[][age_op_width], int tf,
   double rn1 = uniform();
   double rn2 = uniform();
 
-  sprintf(outputFilename,"./%s/Total_IR_%g_IV_%g_VR_%g_%s_UnlockSchoolsAt_%g_%lf%lf-%i.txt",output_folder,initial_recovered_fraction*100, initial_vaccinated_fraction*100, dvr,vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset",unlockSchoolsOn,rn1,rn2,iter);
+  sprintf(outputFilename,"./%s/Total_IR_%g_IV_%g_VR_%g_%s_UnlockSchoolsOn_%g_%lf%lf-%i.txt",output_folder,initial_recovered_fraction*100, initial_vaccinated_fraction*100, dvr,vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset",unlockSchoolsOn,rn1,rn2,iter);
   FILE *fpt=(FILE *)fopen(outputFilename,"wt"); // Open the file to print output
 
   if(fpt){
     if(print_log){
       fprintf(fpt,"###### TEST LOG ####################\n");
       fprintf(fpt,"# Time taken               : %.2f s\n",time_taken);
-
-      fprintf(fpt,"# Test Parameters: \n");
-      fprintf(fpt,"# %.2f %.2f %.2f %.2f\n", Tpars[0][0], Tpars[0][1], Tpars[0][2], Tpars[0][3]);
-      fprintf(fpt,"# %.2f %.2f %.2f %.2f\n", Tpars[1][0], Tpars[1][1], Tpars[1][2], Tpars[1][3]);
-
-      fprintf(fpt,"# Confined Less Infective? : %s\n", details[0] ? "True": "False");
-      fprintf(fpt,"# Homes Quarantined?       : %s\n", details[1] ? "True": "False");
-      fprintf(fpt,"# Quarantine when sampled? : %s\n", details[2] ? "True": "False");
-      fprintf(fpt,"# Testing Started When     : %.2f%% recovered\n", begin_at);
-      fprintf(fpt,"# Fraction Tested Daily    : %.2f%%\n", test_frac);
-
-      fprintf(fpt,"# LQ Tests Done in total   : %d\n", details[3]);
-      fprintf(fpt,"# HQ Tests Done in total   : %d\n", details[4]);
-      fprintf(fpt,"# All Tests Done in total  : %d\n", details[5]);
-      fprintf(fpt,"# Results Given in total   : %d\n", details[6]);
-      fprintf(fpt,"# Locations Moved in total : %d\n", details[7]);
-      fprintf(fpt,"# Total recovered HCW      : %d\n", details[8]);
-      fprintf(fpt,"# Total HCW                : %d\n", details[9]);
+      fprintf(fpt,"# Locations Moved in total : %d\n", details[0]);
+      fprintf(fpt,"# Total recovered HCW      : %d\n", details[1]);
+      fprintf(fpt,"# Total HCW                : %d\n", details[2]);
 
       fprintf(fpt,"# Vaccination strategy     : %s\n", vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset");
       fprintf(fpt,"# Total Vaccines Given     : %d\n", vaccines_administered);
       fprintf(fpt,"# Schools unlocked on day  : %g\n", unlockSchoolsOn);
 
       fprintf(fpt,"# Rate Array: \n");
-      for(int i=0; i<n_states;i++){fprintf(fpt,"# ");for(int j=0; j<n_states;j++){fprintf(fpt,"%5g ", rate[0][i][j]);}fprintf(fpt,"\n");}// NOTE! : Change to correct rates
+      for(int i=0; i<n_states;i++){fprintf(fpt,"# ");for(int j=0; j<n_states;j++){fprintf(fpt,"%5g ", rate[0][i][j]);}fprintf(fpt,"\n");} // NOTE! : Change to correct rates
       fprintf(fpt,"###### END LOG #####################\n");
       fprintf(fpt,"#\n");
-      fprintf(fpt, "#%s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s %s\n","Day","nS","nE","nA","nP","nMI","nSI","nR","nH","nD","nV","nBS","PCR_conducted_today", "RAT_conducted_today", "Tests_remaining_today", "Agents_currently_confined", "Quarantines_removed_today","Locations_in_quarantine_today" );
+      fprintf(fpt, "#%s %s %s %s %s %s %s %s %s %s %s %s\n","Day","nS","nE","nA","nP","nMI","nSI","nR","nH","nD","nV","nBS");
     }
 
     for(int i=0;i<tf;i++){
@@ -478,7 +448,7 @@ void writetofile(int output[][op_width], int age_output[][age_op_width], int tf,
   errno = 0;      // Variable to store error number in case file open does not work
   char ageOutputFilename[1000];
 
-  sprintf(ageOutputFilename,"./%s/AgeStratified_IR_%g_IV_%g_VR_%g_%s_UnlockSchoolsAt_%g_%lf%lf-%i.txt",output_folder,initial_recovered_fraction*100, initial_vaccinated_fraction*100, dvr,vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset",unlockSchoolsOn,rn1,rn2,iter);
+  sprintf(ageOutputFilename,"./%s/AgeStratified_IR_%g_IV_%g_VR_%g_%s_UnlockSchoolsOn_%g_%lf%lf-%i.txt",output_folder,initial_recovered_fraction*100, initial_vaccinated_fraction*100, dvr,vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset",unlockSchoolsOn,rn1,rn2,iter);
   FILE *fpt1=(FILE *)fopen(ageOutputFilename,"wt"); // Open the file to print output
 
   if(fpt){
@@ -487,30 +457,16 @@ void writetofile(int output[][op_width], int age_output[][age_op_width], int tf,
       fprintf(fpt1,"# Time taken               : %.2f s\n",time_taken);
       fprintf(fpt1,"# Main file                : %s \n",outputFilename);
 
-      fprintf(fpt1,"# Test Parameters: \n");
-      fprintf(fpt1,"# %.2f %.2f %.2f %.2f\n", Tpars[0][0], Tpars[0][1], Tpars[0][2], Tpars[0][3]);
-      fprintf(fpt1,"# %.2f %.2f %.2f %.2f\n", Tpars[1][0], Tpars[1][1], Tpars[1][2], Tpars[1][3]);
-
-      fprintf(fpt1,"# Confined Less Infective? : %s\n", details[0] ? "True": "False");
-      fprintf(fpt1,"# Homes Quarantined?       : %s\n", details[1] ? "True": "False");
-      fprintf(fpt1,"# Quarantine when sampled? : %s\n", details[2] ? "True": "False");
-      fprintf(fpt1,"# Testing Started When     : %.2f%% recovered\n", begin_at);
-      fprintf(fpt1,"# Fraction Tested Daily    : %.2f%%\n", test_frac);
-
-      fprintf(fpt1,"# LQ Tests Done in total   : %d\n", details[3]);
-      fprintf(fpt1,"# HQ Tests Done in total   : %d\n", details[4]);
-      fprintf(fpt1,"# All Tests Done in total  : %d\n", details[5]);
-      fprintf(fpt1,"# Results Given in total   : %d\n", details[6]);
       fprintf(fpt1,"# Locations Moved in total : %d\n", details[7]);
       fprintf(fpt1,"# Total recovered HCW      : %d\n", details[8]);
       fprintf(fpt1,"# Total HCW                : %d\n", details[9]);
 
-      fprintf(fpt,"# Vaccination strategy     : %s\n", vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset");
-      fprintf(fpt,"# Total Vaccines Given     : %d\n", vaccines_administered);
-      fprintf(fpt,"# Schools unlocked on day  : %g\n", unlockSchoolsOn);
+      fprintf(fpt1,"# Vaccination strategy     : %s\n", vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset");
+      fprintf(fpt1,"# Total Vaccines Given     : %d\n", vaccines_administered);
+      fprintf(fpt1,"# Schools unlocked on day  : %g\n", unlockSchoolsOn);
 
       fprintf(fpt1,"# Rate Array: \n");
-      for(int i=0; i<n_states;i++){fprintf(fpt1,"# ");for(int j=0; j<n_states;j++){fprintf(fpt1,"%5g ", rate[0][i][j]);}fprintf(fpt1,"\n");}// NOTE! : Change to correct rates
+      for(int i=0; i<n_states;i++){fprintf(fpt1,"# ");for(int j=0; j<n_states;j++){fprintf(fpt1,"%5g ", rate[0][i][j]);}fprintf(fpt1,"\n");} // NOTE! : Change to correct rates
       fprintf(fpt1,"###### END LOG #####################\n");
       fprintf(fpt1,"#\n");
 
@@ -540,65 +496,18 @@ void writetofile(int output[][op_width], int age_output[][age_op_width], int tf,
 }
 
 
-void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample_taken, double begin_at, double test_frac, double start_vacc, double dvr, double unlockSchoolsOn, int iter){
+void run(int tf, double start_vacc, double dvr, double unlockSchoolsOn, int iter){
 
-  clock_t start, end; // Measuring how long the function takes to run
+  clock_t start, end;                                     // Measuring how long the function takes to run
   double cpu_time_used;
   start = clock();
 
-  bool is_confined[n_pop]  = {};
-  bool being_tested[n_pop] = {};
-  bool loc_confined[n_loc] = {};
-
-  //* Added to keep track of retesting RAT negative symptomatics **//
-  int last_test_type[n_pop]={};
-  std::fill_n(last_test_type,n_pop,-1000);    // Set all values of last_test_type to -1000
-  int last_test_result[n_pop]={};
-  std::fill_n(last_test_result,n_pop,-1000);  // Set all values of last_test_result to -1000
-  /*****************************************************************/
-
-  int test_result[n_pop]   = {};
-  int next_test_date[n_pop]= {};
-
-  int result_declared_date[n_pop]={};
-  std::fill_n(result_declared_date,n_pop,-1000);  // Set all values of result_declared_date to -1000
-
-  int loc_confined_time[n_loc] = {};
-  std::fill_n(loc_confined_time,n_loc,-1000);     // Set all values of loc_confined_time to -1000
-
-  int person_isolated_time[n_pop] = {};
-  std::fill_n(person_isolated_time, n_pop,-1000);
-
-  //   HQ=>PCR     LQ=>RAT
-  int hq_tests_conducted = 0;
-  int lq_tests_conducted = 0;
-  int tests_conducted    = 0;
-  int results_declared   = 0;
   int locations_moved    = 0;
 
   double r[n_states][n_states] = {};                      // Array to store rates per event
 
   double alphaH = 1 - Cpars[4];                           // Quantity by which V is reduced per hospitalised individual
-  double alphaQ = 1 - Cpars[5];
-
   double alphaT = 1 - transmission_reduction;             // Effective reduction in transmission per person due to vaccination
-
-  int tests_available_daily = test_frac/100 * n_pop;
-  int tests_remaining_today = test_frac/100 * n_pop;
-
-  int lq_tests_daily = Tpars[0][3]*tests_available_daily;
-  int lq_tests_today = Tpars[0][3]*tests_available_daily;
-
-  int hq_tests_daily = Tpars[1][3]*tests_available_daily;
-  int hq_tests_today = Tpars[1][3]*tests_available_daily;
-
-  double lq_sens = Tpars[0][0];
-  double lq_spec = Tpars[0][1];
-  double lq_delay= Tpars[0][2];
-
-  double hq_sens = Tpars[1][0];
-  double hq_spec = Tpars[1][1];
-  double hq_delay= Tpars[1][2];
 
   double t = 0.0;
   int day  = 0;
@@ -608,7 +517,7 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
   bool second_move_done=false;
   bool third_move_done =false;
 
-  bool lock_schools = start_with_schools_locked; //Reset schools to start off locked
+  bool lock_schools = start_with_schools_locked;           //Reset schools to start off locked
 
   int output[tf+1][op_width];         // Output array, to be printed to file
   int age_output[tf+1][age_op_width]; // Output array per age
@@ -636,7 +545,6 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
   output[day][0] = day; for(int q=0;q<n_states;q++){output[day][q+1]=n[q];}
   output[day][n_states+1] = vaccines_administered;
   output[day][n_states+2] = bs;
-  output[day][n_states+3]=hq_tests_conducted;output[day][n_states+4]=lq_tests_conducted;output[day][n_states+5]=tests_remaining_today;output[day][n_states+6]=0;output[day][n_states+7]=0;output[day][n_states+8]=0;
 
   age_output[day][0] = day; int counter = 1; for(int r=0;r<max_age;r++){for(int q=0;q<n_states;q++){age_output[day][counter]=n_per_age[r][q];counter++;} age_output[day][counter]=agewise_vaccines_administered[r];counter++;
   age_output[day][counter]=agewise_bs[r];counter++;}
@@ -657,7 +565,7 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
 
       for(int i=0;i<n_pop;i++){
 
-        if(pop[i][s]!=H && pop[i][s]!=D && is_confined[i] == false && loc_confined[pop[i][c]]==false){
+        if(pop[i][s]!=H && pop[i][s]!=D){
           locations_moved++;
           int home_loc = pop[i][h];
           int work_loc = pop[i][w];
@@ -731,12 +639,9 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
 
         for(int state = 0; state<n_states;state++){N += n_per_room[i][room][state];}                 // Total number currently in this room
 
-        int conf_by_state_in_loc[n_states]={};
-
         for(int p=0;p<len_ppl_linked_to[i];p++){                                                     // For all people linked to this school
           int person = people_linked_to[i][p];
           if(pop[person][c]==i && current_room[person] == room){ ind.push_back(person); counter++;}  // If the person is in this school and is currently in this room, add them to ind
-          else if(pop[person][c]==i && is_confined[person]){ conf_by_state_in_loc[pop[person][s]]++;}
         }
 
         int sum=0;for(int state=0;state<n_states;state++){sum+=n_per_room[i][room][state];}
@@ -745,20 +650,13 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
 
         if(N==0){continue;}
 
-        int conf_by_state_in_room[n_states]={};
-        int tot_conf = 0;
-
         int vacc_by_state_in_room[n_states]={}; // Number of vaccinated individuals in this room
         int tot_vacc = 0;
 
         for(int j = 0; j<N;j++){      // Go over people in this room
             int p = ind[j];           // index of person
-            if(quarantine_confined == true && is_confined[p] == true) {conf_by_state_in_room[pop[p][s]]++; tot_conf++; } // If the person is confined, increment the conf_by_state_in_loc of their state
-            else if(is_vaccinated[p]==true){vacc_by_state_in_room[pop[p][s]]++; tot_vacc++; }
+            if(is_vaccinated[p]==true){vacc_by_state_in_room[pop[p][s]]++; tot_vacc++; }
         }
-
-
-        if(loc_confined[i]==true && conf_by_state_in_loc[S]+conf_by_state_in_loc[E]+conf_by_state_in_loc[A]+conf_by_state_in_loc[P]+conf_by_state_in_loc[MI]+conf_by_state_in_loc[SI]+conf_by_state_in_loc[R]+conf_by_state_in_loc[H] == 0){loc_confined[i]=false;loc_confined_time[i]=-1000;} // Unlock the house if there are no confined people
 
         shuffle(0,N,ind);      // Shuffle list of people currently in locations
 
@@ -766,7 +664,7 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
 
           int age = pop[ind[j]][a];
 
-          double new_gamma = rate[age][E][A]/(rate[age][E][A]+rate[age][E][P]);    // Default vals: If the person isn't a vaccinated test subject, f is just gamma
+          double new_gamma = rate[age][E][A]/(rate[age][E][A]+rate[age][E][P]);    // Default vals: If the person isn't a vaccinated subject, f is just gamma
           double lambda_E = rate[age][E][A]+rate[age][E][P];
           double beta_multiplier = 1.0;                                            // Default beta-multiplier (reduction) = 1 unless vaccinated
 
@@ -783,10 +681,10 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
           double V = people_here - alphaH*n_per_room[i][room][H];   // Spatial damping parameter (adjusted by alphaH for hospitals)
 
           // S->E
-          r[S][E] = beta_multiplier * rate[age][S][E] * 1/V * (Cpars[0]*(n_per_room[i][room][A] - conf_by_state_in_room[A]*alphaQ - vacc_by_state_in_room[A]*alphaT) +    // SA
-                                                               Cpars[1]*(n_per_room[i][room][P] - conf_by_state_in_room[P]*alphaQ - vacc_by_state_in_room[P]*alphaT) +    // SP
-                                                               Cpars[2]*(n_per_room[i][room][MI]-conf_by_state_in_room[MI]*alphaQ - vacc_by_state_in_room[MI]*alphaT) +   // S-MI
-                                                               Cpars[3]*(n_per_room[i][room][SI]-conf_by_state_in_room[SI]*alphaQ - vacc_by_state_in_room[SI]*alphaT) +   // S-SI
+          r[S][E] = beta_multiplier * rate[age][S][E] * 1/V * (Cpars[0]*(n_per_room[i][room][A]  - vacc_by_state_in_room[A]*alphaT) +    // SA
+                                                               Cpars[1]*(n_per_room[i][room][P]  - vacc_by_state_in_room[P]*alphaT) +    // SP
+                                                               Cpars[2]*(n_per_room[i][room][MI] - vacc_by_state_in_room[MI]*alphaT) +   // S-MI
+                                                               Cpars[3]*(n_per_room[i][room][SI] - vacc_by_state_in_room[SI]*alphaT) +   // S-SI
                                                                Cpars[4]*n_per_room[i][room][H]);                                                                          // SH
           r[E][A]  =  new_gamma * lambda_E;      // E->A
           r[E][P]  = (1 - new_gamma) * lambda_E; // E->P
@@ -815,10 +713,10 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
             double a = beta_multiplier;
             double b = rate[age][S][E];
             double c = 1/V;
-            double d =  (Cpars[0]*(n_per_room[i][room][A] - conf_by_state_in_room[A]*alphaQ - vacc_by_state_in_room[A]*alphaT) +    // SA
-                         Cpars[1]*(n_per_room[i][room][P] - conf_by_state_in_room[P]*alphaQ - vacc_by_state_in_room[P]*alphaT) +    // SP
-                         Cpars[2]*(n_per_room[i][room][MI]-conf_by_state_in_room[MI]*alphaQ - vacc_by_state_in_room[MI]*alphaT) +   // S-MI
-                         Cpars[3]*(n_per_room[i][room][SI]-conf_by_state_in_room[SI]*alphaQ - vacc_by_state_in_room[SI]*alphaT) +   // S-SI
+            double d =  (Cpars[0]*(n_per_room[i][room][A]  - vacc_by_state_in_room[A]*alphaT) +    // SA
+                         Cpars[1]*(n_per_room[i][room][P]  - vacc_by_state_in_room[P]*alphaT) +    // SP
+                         Cpars[2]*(n_per_room[i][room][MI] - vacc_by_state_in_room[MI]*alphaT) +   // S-MI
+                         Cpars[3]*(n_per_room[i][room][SI] - vacc_by_state_in_room[SI]*alphaT) +   // S-SI
                          Cpars[4]*n_per_room[i][room][H]);
             printf("Location %i Beta Multiplier %lf RateSE %lf 1/V %lf I/N %lf \n",i,a,b,c,d );
           }
@@ -839,11 +737,6 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
                 n_per_age[age][from]--;n_per_age[age][to]++;
                 n_per_room[i][room][from]--; n_per_room[i][room][to]++;
 
-                if(is_confined[ind[j]]==true){
-                    conf_by_state_in_loc[from]--;                        // Change the number of confined in different states accordingly
-                    conf_by_state_in_loc[to]++;
-                    if(conf_by_state_in_loc[S]<0 || conf_by_state_in_loc[E]<0 || conf_by_state_in_loc[A]<0 || conf_by_state_in_loc[P]<0 || conf_by_state_in_loc[MI]<0 || conf_by_state_in_loc[SI]<0 || conf_by_state_in_loc[R]<0||conf_by_state_in_loc[H]<0){printf("Negative confs\n");}
-                }
                 vacc_by_state_in_room[from]--;vacc_by_state_in_room[to]++;
 
                 if(to==H){
@@ -855,13 +748,6 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
 
                   people_linked_to[hosp].push_back(ind[j]); len_ppl_linked_to[hosp]++; // Link individual permanently to that hospital
 
-                  if(is_confined[ind[j]]==true){
-                    is_confined[ind[j]] = false;              // Remove confinement
-                    person_isolated_time[ind[j]] = -1000;     // Reset time of isolation.
-                    conf_by_state_in_loc[H]--;                // Reduce number of confined hospitalised in this location if the person was confined (since they've moved to a hospital)
-                    conf_by_state_in_room[H]--;
-                  }
-
                   n_per_location[ pop[ind[j]][c] ][H]--;      // Decrement number of "from" in current location
                   n_per_room[ pop[ind[j]][c] ][room][H]--;
                   pop[ind[j]][c] = hosp;                      // Send them to a random hospitals
@@ -870,12 +756,10 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
                   n_per_room[pop[ind[j]][c]][hosp_room][H]++; // Send them to a random room in the hospital.
                 }
 
-                else if(from==H && (to == R || to == D)){     // If they exit from H, remove confinement and move them home
+                else if(from==H && (to == R || to == D)){     // If they exit from H, move them home
 
                   int home = pop[ind[j]][h];
                   int home_room = randint(n_rooms[home]);
-
-                   is_confined[ind[j]] = false;               // Remove confinement
 
                    // Send recovered or dead who were hospitalised home
                   n_per_location[ pop[ind[j]][c] ][to]--;     // Decrement number of to (=R,D) in current locations
@@ -901,222 +785,6 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
     /**************************** THE END OF DAY(S) ****************************/
 
     if(t>=day+1){
-
-            /************* TARGETED TESTING ******************/
-
-            if(n[R]>=begin_at/100 * n_pop){
-
-              // Find all symptomatics
-
-              int list_of_sym[n_pop]={};
-              int n_sym = 0;
-
-              int sym_rat_neg[n_pop]={};             // Symptomatics who tested negative on an RAT test that was declared greater than or equal to 7 days ago
-              int n_srn = 0;
-
-              int list_of_remaining[n_pop]={};       // Array to store remaining people for random testing
-              int n_remaining  = 0;                  // Number of such people
-
-              int not_eligible_for_testing = 0;      // Number of people not eligible for testing today
-
-
-              auto test = [&] (int p) {
-                // If the person `p` is eligible
-                if(day >= next_test_date[p] && being_tested[p]==false && tests_remaining_today>0){
-                  // Perform a test
-                  being_tested[p] = true; tests_conducted++; tests_remaining_today--;
-
-                  if(quarantine_when_sample_taken==true){   // Quarantine as soon as sample is taken
-                    // Move them Home
-                    n_per_location[pop[p][c]][pop[p][s]]--;
-                    n_per_room[pop[p][c]][current_room[p]][s]--;
-                    pop[p][c] = pop[p][h];
-                    current_room[p] = randint(n_rooms[pop[p][c]]);
-                    n_per_location[pop[p][c]][pop[p][s]]++;
-                    n_per_room[pop[p][c]][current_room[p]][s]--;
-
-
-                    is_confined[p] = quarantine_confined;
-                    person_isolated_time[p] = day;          // Time of isolation.
-
-                    loc_confined[pop[p][h]] = lock_homes;   // Lock home depending on variable `lock_homes`.
-                    loc_confined_time[pop[p][h]] = day;
-                  }
-
-                  // Targeted testing using HQ tests unless there are none
-                  int test_type = PCR;
-
-                  if(hq_tests_today<=0){test_type = RAT;} // If no HQ tests available, give them LQ (one of the two is guaranteed, since tests_remaining_today>0)
-
-                  last_test_type[p] = test_type;          // Keeping track of last test type
-
-                  if(test_type==RAT){
-                    // Do a low quality test
-                    lq_tests_conducted++; lq_tests_today--;
-
-                    next_test_date[p]      = day + days_bw_lq_tests;   // Next day to be considered for a test
-                    result_declared_date[p]= day + lq_delay;           // Days to wait before result result_declared_date
-
-                    if(pop[p][s]>S && pop[p][s]<R && pop[p][s]!=E){    // If the person isn't susceptible, exposed, recovered, hospitalised or dead
-                      if(uniform()<lq_sens){test_result[p]=1;}         // and the test comes back positive, set their test_result
-                      else{test_result[p]=-1;}                         // otherwise it's negative
-                    }
-                    else if(pop[p][s]!=H && pop[p][s]!=D){             // On the other hand, if they are S or R or D (not testing Hospitalised)
-                      if(uniform()>lq_spec){test_result[p]=1;}         // and the test comes back false positive, set their test_result
-                      else{test_result[p]=-1;}                         // otherwise it's negative
-                    }
-                  }
-
-                  else if(test_type==PCR){
-                    // Do a high quality test
-
-                    hq_tests_conducted++; hq_tests_today--;
-
-                    next_test_date[p]      = day + days_bw_hq_tests;   // Next day to be considered for a test
-                    result_declared_date[p]= day + hq_delay;           // Days to wait before result result_declared_date
-
-                    if(pop[p][s]>S && pop[p][s]<R){                    // If the person isn't susceptible or recovered or hospitalised
-                      if(uniform()<hq_sens){test_result[p]=1;}         // and the test comes back positive, set their test_result
-                      else{test_result[p]=-1;}                         // otherwise it's negative
-                    }
-                    else if(pop[p][s]!=H){                             // On the other hand, if they are S or R (not testing Hospitalised)
-                      if(uniform()>hq_spec){test_result[p]=1;}         // and the test comes back false positive, set their test_result
-                      else{test_result[p]=-1;}                         // otherwise it's negative
-                    }
-                  }
-                }
-
-              };
-
-
-              for(int i=0; i<n_pop;i++){
-
-                /******************** Find list of targets and remaining people **********************/
-
-                if((pop[i][s]==MI||pop[i][s]==SI) && day>=next_test_date[i] && being_tested[i]==false && is_confined[i]==false){
-                  list_of_sym[n_sym] = i; n_sym++;
-
-                  // Retesting symptomatics who received a negative RAT test a week ago
-                  if(day>=result_declared_date[i]+7 && last_test_type[i]==RAT && last_test_result[i]==-1){sym_rat_neg[n_srn] = i; n_srn++;} // Make separate list of symptomatics who
-                                                                                                                                            // last tested negative on a RAT, more than 7 days ago
-                }
-                else if(pop[i][s]!=H && pop[i][s]!=D && being_tested[i]==false && is_confined[i]==false){
-                  list_of_remaining[n_remaining] = i; n_remaining++;
-                }
-                else{ not_eligible_for_testing++;}
-
-                /****************************** Done finding lists **********************************/
-              }
-
-              list_of_sym[n_sym] = -1;                 // Set -1 to mark the end of this array
-              list_of_remaining[n_remaining] = -1;     // Set -1 to mark end of this array
-
-              sym_rat_neg[n_srn] = -1;                 // Set -1 to mark end of this array
-
-
-              if(n_sym>0){
-                int targeted_tests_done_today =   std::min(tests_remaining_today,n_sym);   // Tests done this dt is the minimum of the tests available and
-                                                                                           // the people to be tested. As the day progresses, the tests
-                                                                                           // available drops lower until it's 0, and no testing happens.
-
-                shuffle(0, n_sym, list_of_sym); // Shuffle list of people to be tested.
-
-                /*** REARRANGE list_of_sym SO THAT sym_rat_neg COME FIRST *****/
-                int counter = 0;
-
-                for(int j=0;j<n_srn;j++){                    // For every sym_rat_neg
-                  for(int k=0;k<n_sym;k++){                  // Go over the remaining symptomatics
-                    if(list_of_sym[k] == sym_rat_neg[j]){    // When you find this symptomatic in that list
-                      int temp = list_of_sym[counter];       // Swap the lowest person on the list eligible
-                      list_of_sym[counter] = list_of_sym[k];
-                      list_of_sym[k] = temp;
-
-                      counter++; break;                      // Increase the counter and break this loop
-                    }
-                  }
-                }
-
-                for(int j=0; j<targeted_tests_done_today;j++){
-                  int si = list_of_sym[j];  // Individual to test
-                  test(si);
-                }
-              } // END OF TARGETED TESTING
-
-              /*************RANDOMLY TESTING POPULATION*************/
-
-              // Test remaining people in population (in the array list_of_remaining) randomly
-
-              int remaining_tests_done_today =   std::min(tests_remaining_today,n_remaining);  // Remaining tests done is the minimum of the tests available and
-                                                                                               // available drops lower until it's 0, and no testing happens.
-                                                                                               // the people to be tested. As the day progresses, the tests
-
-              if(remaining_tests_done_today>0){              // If there are any tests remaining
-
-                  shuffle(0,n_remaining,list_of_remaining);  // Shuffle list of remaining people
-
-                  // Test the first "remaining_tests_done_today" people
-                  for(int j=0; j<remaining_tests_done_today;j++){
-                    int ri = list_of_remaining[j];           // Individual to test
-                    test(ri);
-                  }
-              } // END OF RANDOM TESTING
-
-              /***********************DONE TESTING!***********************/
-
-              for(int i=0;i<n_pop;i++){
-
-                  /*********************DECLARING RESULTS********************/
-
-                  if(day == result_declared_date[i] && being_tested[i]==true){
-
-                    // First set them to no longer being tested
-                    being_tested[i] = false;
-                    results_declared++;
-
-                    // Declare results
-
-                    if(test_result[i]==1 && pop[i][s] != H){ // If the result is positive, and the person hasn't already moved to a hospital or died
-                      positives++;
-                      is_confined[i] = quarantine_confined;  // Confine them if quarantine_confined==true
-                      person_isolated_time[i] = day;         // Time of isolation.
-
-                      last_test_result[i] = 1;               // Keep track of retesting RAT negative symptomatics
-
-                      // Move them home
-                      n_per_location[pop[i][c]][pop[i][s]]--;              // Decremement number in current location
-                      n_per_room[pop[i][c]][current_room[i]][pop[i][s]]--; // Decremement number in current room
-                      if(pop[i][c] == pop[i][w]){ pop[i][c] = pop[i][h]; current_room[i] = randint(n_rooms[pop[i][h]]);}  // If they're at work, send them home to a random room.
-                      n_per_location[pop[i][c]][pop[i][s]]++;              // Incremement number in current location.
-                      n_per_room[pop[i][c]][current_room[i]][pop[i][s]]++; // Increment number in current room
-
-                      loc_confined[pop[i][h]] = lock_homes;                // Reconfine their homes
-                      loc_confined_time[pop[i][h]] = day;
-
-                      next_test_date[i] = day + if_positive_test_after;    // Not eligible for tests for 14 days.
-                    }
-                    else if(test_result[i] == -1 && pop[i][s] != H){       // If they're negative and have not been hospitalised
-                      is_confined[i] = false;                              // Remove confinement
-                      person_isolated_time[i] = -1000;                     // Reset time of isolation.
-
-                      last_test_result[i] = -1;                            // Keep track of last test result (to retest RAT negative symptomatics)
-
-                    }
-
-                    if(pop[i][s]==H || pop[i][s]==D){is_confined[i]=false; person_isolated_time[i]=-1000;last_test_result[i]=0;} // If they've been hospitalised, do the same as for negative results,
-                                                                                                                                 // only set their last test result to 0.
-                    test_result[i] = 0;        // Reset test result to 0.
-                  }
-
-                  /***********************DONE DECLARING!**********************/
-
-                  /******** Remove confinement if 14 days have passed ********/
-
-                  if(is_confined[i]==true && day >= person_isolated_time[i]+total_isolation_time){ // If they have been confined for long enough
-                    is_confined[i]=false;                                                          // Remove confinement
-                    person_isolated_time[i] = -1000;                                               // Reset time of isolation
-                  }
-              }
-            }
 
           //************ VACCINATION ******************//
 
@@ -1204,12 +872,12 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
               bool added = false;
               for(int j=0;j<len_vacc_targets;j++){
                 int v_target = vacc_targets[j];
-                if(pop[i][a]==v_target && pop[i][s]!=MI && pop[i][s]!=SI && pop[i][s]!=H && pop[i][s]!=D && !is_vaccinated[i] && !being_tested[i]){
+                if(pop[i][a]==v_target && pop[i][s]!=MI && pop[i][s]!=SI && pop[i][s]!=H && pop[i][s]!=D && !is_vaccinated[i]){
                   backup[pop[i][s]]++;
                   list_of_vacc.push_back(i); n_to_vacc++; added = true; break;
                 }
               }
-              if(added == false && pop[i][s]!=MI && pop[i][s]!=SI && pop[i][s]!=H && pop[i][s]!=D && !is_vaccinated[i] && !being_tested[i]){
+              if(added == false && pop[i][s]!=MI && pop[i][s]!=SI && pop[i][s]!=H && pop[i][s]!=D && !is_vaccinated[i]){
                 list_of_others.push_back(i); n_others++;
               }
             }
@@ -1247,28 +915,14 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
                 vaccines_administered++;
                 agewise_vaccines_administered[pop[vi][a]]++;
               }
-
-            }
-
-          }
-
-          //****************************** Lock or unlock homes ******************************//
-          int unlockedtoday = 0;
-          for(int i=0; i<n_loc;i++){    // This can probably be added to the first location loop, if needed.
-
-            if(loc_confined[i]==true && day-loc_confined_time[i] >= total_loc_confined_time){
-              // for(int j = 0; j<n_pop; j++){if(pop[j][c]==i && is_confined[j]==true){printf("Problem in location %i\n", i);}}
-              loc_confined[i]      = false; // Remove confinement
-              loc_confined_time[i] = - 1000;
-              unlockedtoday++;
             }
           }
-          //***********************************************************************************//
+
 
       //******************** Moving people around deterministically (WORK TO HOME) ********************//
 
       for(int i=0;i<n_pop;i++){
-        if(pop[i][s]!=H && pop[i][s]!=D && is_confined[i] == false && loc_confined[pop[i][c]]==false){
+        if(pop[i][s]!=H && pop[i][s]!=D){
 
           locations_moved++;
 
@@ -1285,14 +939,6 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
       third_move_done       = false;
 
       //***********************************************************************************************//
-
-      // Count locations currently quarantined
-      int locked = 0;
-      for(int hq=0;hq<n_loc;hq++){if(loc_confined_time[hq]>=0 && lock_homes==true){locked++;}}
-
-      // Count people currently confined
-      int currently_confined = 0;
-      for(int hq=0;hq<n_pop;hq++){if(is_confined[hq]==true){currently_confined++;}}
 
       day++; // Increment the day
 
@@ -1313,15 +959,11 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
         agewise_bs[age] = agewise_populations[age] - agewise_some_protection[age];
       }
 
-      //************** Write the output to an array, and reset the number of tests **************//
+      //***************************** Write the output to an array *****************************//
 
       output[day][0] = day; for(int q=0;q<n_states;q++){output[day][q+1]=n[q];}
       output[day][n_states+1] = vaccines_administered;
       output[day][n_states+2] = bs;
-      output[day][n_states+3]=hq_tests_conducted;output[day][n_states+4]=lq_tests_conducted;output[day][n_states+5]=tests_remaining_today;output[day][n_states+6]=currently_confined;output[day][n_states+7]=unlockedtoday;output[day][n_states+8]=locked;
-      tests_remaining_today = tests_available_daily;
-      lq_tests_today = lq_tests_daily;
-      hq_tests_today = hq_tests_daily;
 
       age_output[day][0] = day; int counter = 1; for(int r=0;r<max_age;r++){for(int q=0;q<n_states;q++){age_output[day][counter]=n_per_age[r][q];counter++;} age_output[day][counter] = agewise_vaccines_administered[r]; counter++;
       age_output[day][counter] = agewise_bs[r]; counter++;}
@@ -1338,7 +980,7 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
   //*** Checking fraction of HCW who contracted the disease during the pandemic ***//
   int hcw_recovered = 0;
   int hcw = 0;
-  for(int i=0;i<n_pop;i++){               // Find all HCW, and mark those that have recovered.
+  for(int i=0;i<n_pop;i++){               // Find all HCW, and mark those that have recovered or died.
     if(pop[i][w]<n_hospitals){
       hcw++;
       if(pop[i][s]==R || pop[i][s]==D){hcw_recovered++;}
@@ -1348,8 +990,8 @@ void run(double Tpars[][4], int tf, bool lock_homes, bool quarantine_when_sample
   end = clock();
   cpu_time_used = ((double) (end - start)) / CLOCKS_PER_SEC;
 
-  int details[] = {quarantine_confined, lock_homes, quarantine_when_sample_taken, lq_tests_conducted, hq_tests_conducted, tests_conducted, results_declared, locations_moved, hcw_recovered,hcw};
-  writetofile(output, age_output, tf, Tpars, begin_at, test_frac,cpu_time_used,details,iter);
+  int details[] = {locations_moved, hcw_recovered, hcw};
+  writetofile(output, age_output, tf, cpu_time_used, details, iter);
 
 
 }// End of run function.
@@ -1373,14 +1015,13 @@ int main() {
 
   /************* AGE FACTOR *************/
 
-  // double lambda_S_array[] = {0.34*lambda_S, 0.67*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.24*lambda_S, 1.47*lambda_S, 1.47*lambda_S};
   double lambda_S_array[] = {1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S};
 
   double gamma_array[] = {1-0.5, 1-0.55,1- 0.6, 1-0.65,1-0.7, 1-0.75,1-0.8, 1-0.85,1- 0.9, 1-0.9};
 
   double delta_array[] = {1-0.0005,  1-0.00165,  1-0.00720,  1-0.02080,  1-0.03430,  1-0.07650,  1-0.13280,  1-0.20655,  1-0.24570,  1-0.24570};
 
- double sigma_array[] = {0.00002, 0.00002, 0.0001, 0.00032, 0.00098, 0.00265, 0.00766, 0.02439, 0.08292, 0.16190};
+  double sigma_array[] = {0.00002, 0.00002, 0.0001, 0.00032, 0.00098, 0.00265, 0.00766, 0.02439, 0.08292, 0.16190};
 
 
   double lambda_E_array[]  = {lambda_E , lambda_E  , lambda_E , lambda_E ,  lambda_E  , lambda_E  , lambda_E, lambda_E  , lambda_E  , lambda_E};
@@ -1410,26 +1051,9 @@ int main() {
   }
 
 
-  /********* TESTING PARAMETERS *********/
-
-  bool lock_homes=false;                   // Change to true to quarantine homes
-  bool quarantine_when_sample_taken=false; // Change to true to quarantine homes when sample is taken
-  double begin_at  = 100;                  // Start testing when this percentage of the population has recovered
-  double test_frac = 0.0;                  // Daily testing rate (in percentage)
-
-  double rat_delay = 0;                    // RAT test delay
-  double pcr_delay = 0;                    // PCR test delay
-
-  double rat_fraction = 0;                 // RAT fraction in mixture
-  double pcr_fraction = 1-rat_fraction;    // PCR fraction in mixture
-
-  double Tpars[2][4] = {{0.5, 0.98, rat_delay, rat_fraction},   // {{RAT Sensitivity, RAT Specificity, RAT Test Delay, RAT Fraction in Mixture},
-                        {1.0,  1.0, pcr_delay, pcr_fraction}};  //  {PCR Sensitivity, PCR Specificity, PCR Test Delay, PCR Fraction in Mixture}}
-
   /******* SIMULATION PARAMETERS *******/
 
   int tf = 200;                            // Total simulation run time in days
-
 
 
   //********************* Monte Carlo run with the above specifications *********************//
@@ -1457,22 +1081,14 @@ int main() {
         createPopulation(filename);                 // Create a random population with a fixed infection seed (default: 1%) and recovered fraction (default: 30%), set by initial_asymptomatic_fraction
                                                     // Resets the pop array, n_per_location array, and people_linked_to array.
 
-        run(Tpars,
-             tf,
-             lock_homes,
-             quarantine_when_sample_taken,
-             begin_at,
-             test_frac,
-             start_vacc,
-             dvr,
-             unlockSchoolsOn,
-             i);
+        run(tf,
+            start_vacc,
+            dvr,
+            unlockSchoolsOn,
+            i);
        }
     }
 
-
   }
-
-
 
  }
