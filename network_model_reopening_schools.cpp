@@ -28,21 +28,7 @@ int randint(int b)      // Generate a uniform random number in [0, b)
     return d(gen);
 }
 
-void shuffle(int start, int end, int *array)
-{
-    if (end-start > 1)
-    {
-        for (int i = start; i < end; i++)
-        {
-          int j = i + rand() / (RAND_MAX / (end - i) + 1);
-          int t = array[j];
-          array[j] = array[i];
-          array[i] = t;
-        }
-    }
-}
-
-void shuffle(int start, int end, vector<int> array)
+void shuffle(int start, int end, vector<int> array) // For a given vector, shuffle the contents between indices `start` and `end`
 {
     if (end-start > 1)
     {
@@ -80,9 +66,15 @@ Below are certain parameters used by the code. They are divided into three secti
 // ****************** 1. USER DEFINED VARIABLES ********************//
 // *****************************************************************//
 
-double dt = 0.1;
-char output_folder[100] = "tmp";
-bool print_log = true;
+/* Simulation parameters ***************************/
+
+double dt = 0.01;                                       // Single time-step (in days)
+int tf = 200;                                           // Total simulation run time in days
+char input_filename[1000]="synthetic_population.csv";   // Input file in same folder as the code
+char output_folder[100] = "data";                       // Folder within which output files will be stored
+bool print_log = true;                                  // Choose this option if you want to print a log in the output files
+
+/* Population parameters **************************/
 
 const int mult = 1;              // Multiplier to scale up problem
 
@@ -99,6 +91,36 @@ const int classrooms = 100;            // Number of classrooms per school
 double initial_asymptomatic_fraction = 1.00/100; // Initial fraction of asymptomatic
 double initial_recovered_fraction    = 30.0/100; // Initial fraction of recovered
 double initial_vaccinated_fraction   = 20.0/100; // Initial fraction of vaccinated
+
+/* Disease parameters *****************************/
+
+double lambda_S = 0.7;
+double lambda_E = 1/4.5;
+double lambda_A = 1.0/8;
+double lambda_P = 1/1.1;
+double lambda_MI = 1.0/8;
+double lambda_SI = 1/1.5;
+double lambda_H  = 1/18.1;
+
+/* Age stratified Disease parameters *************/
+
+double lambda_S_array[] = {1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S};
+
+double gamma_array[] = {1-0.5, 1-0.55,1- 0.6, 1-0.65,1-0.7, 1-0.75,1-0.8, 1-0.85,1- 0.9, 1-0.9};
+
+double delta_array[] = {1-0.0005,  1-0.00165,  1-0.00720,  1-0.02080,  1-0.03430,  1-0.07650,  1-0.13280,  1-0.20655,  1-0.24570,  1-0.24570};
+
+double sigma_array[] = {0.00002, 0.00002, 0.0001, 0.00032, 0.00098, 0.00265, 0.00766, 0.02439, 0.08292, 0.16190};
+
+
+double lambda_E_array[]  = {lambda_E , lambda_E  , lambda_E , lambda_E ,  lambda_E  , lambda_E  , lambda_E, lambda_E  , lambda_E  , lambda_E};
+double lambda_A_array[]  = {lambda_A , lambda_A  , lambda_A , lambda_A ,  lambda_A  , lambda_A  , lambda_A, lambda_A  , lambda_A  , lambda_A};
+double lambda_P_array[]  = {lambda_P , lambda_P  , lambda_P , lambda_P ,  lambda_P  , lambda_P  , lambda_P, lambda_P  , lambda_P  , lambda_P};
+
+double lambda_MI_array[] = {lambda_MI, lambda_MI , lambda_MI , lambda_MI  , lambda_MI , lambda_MI , lambda_MI , lambda_MI , lambda_MI , lambda_MI};
+double lambda_SI_array[] = {lambda_SI, lambda_SI , lambda_SI , lambda_SI  , lambda_SI , lambda_SI , lambda_SI , lambda_SI , lambda_SI , lambda_SI};
+
+double lambda_H_array[]  = {lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H};
 
 
 double Cpars[] = {1,  1,   1,    1,   0.1}; // Contact parameters for transmission
@@ -137,9 +159,6 @@ const int SI= 5;
 const int R = 6;
 const int H = 7;
 const int D = 8;
-
-const int RAT = 0;
-const int PCR = 1;
 
 const int person_attr = 6;  // Number of attributes a person can be assigned in the pop array (state, age, "something", home location, work location, current location)
 
@@ -204,11 +223,14 @@ int vaccs_per_state[n_states] = {};
 int vaccines_administered = 0;
 int agewise_vaccines_administered[max_age] = {};
 
+/* Output filename ******************************/
+
+char outputFilename[1000];
 
 /************************************************/
 
 
-void readcsv(char *filename) // read in the synthetic population from csv file
+void readcsv(char *filename) // Read in the synthetic population from csv file
 {
 int num_to_prevaccinate = (int)(initial_vaccinated_fraction*n_pop);
 
@@ -228,7 +250,7 @@ while (row<n_pop)
 
 	column = 0;
 
-	if (row == -1) {row++;continue;} // because you need to discard the first row
+	if (row == -1) {row++;continue;} // Because you need to discard the first row (of headers)
 
 	// Get each column as a string, convert to number for required columns
 	while ((value=strsep(&buffer, ","))!=NULL)
@@ -330,7 +352,7 @@ for(int i=0;i<n_loc;i++){
 
 //********* DONE CREATING n ARRAY **************************//
 
-}
+} // End of readcsv function
 
 
 void createPopulation(char *filename){
@@ -387,7 +409,7 @@ void createPopulation(char *filename){
   // *************************************************//
   // **************** PRINT POPULATION ***************//
   // *************************************************//
-
+  // // In case you'd like to debug your code
   // for(int i=0; i<n_pop;i++){
   //   for(int j=0;j<person_attr;j++){
   //     printf("%i, ", pop[i][j]);
@@ -397,14 +419,34 @@ void createPopulation(char *filename){
   // }
   // exit(2);
 
-}
+} // End of createPopulation function
 
 
-char outputFilename[1000];
-void writetofile(int output[][op_width], int age_output[][age_op_width], int tf, double time_taken, int details[9],int iter){
-  // FOR REFERENCE: int details[] = {locations_moved, hcw_recovered, hcw};
+void writetofile(int output[][op_width], int age_output[][age_op_width], int tf, double time_taken, int details[3],int iter){
 
-  // Write output to a file
+  // ***********************************************************************************//
+  // **************************** WRITING TO OUTPUT FILES ******************************//
+  // ***********************************************************************************//
+  /*
+    The purpose of this function is to create two output txt files with unique names:
+    1. A "Total" file, which contains the aggregate number of individuals in each
+       disease state, as well as the number of vaccines and the background seropositivity,
+       at the end of every day. The header for this file is:
+       "Day","nS","nE","nA","nP","nMI","nSI","nR","nH","nD","nV","nBS"
+    2. An "AgeStratified" file, which contains the same information, but for each age-decade.
+       The header for this file will therefore look something like:
+       "Day","nS10","nE10","nA10","nP10","nMI10","nSI10","nR10","nH10","nD10","nV10","nBS10"..."nS90","nE90","nA90","nP90","nMI90","nSI90","nR90","nH90","nD90","nV90","nBS90"
+
+    The filenames of each of these files is then followed by a string, containing the initial percentage of recovered (IR), the initial percentage of (pre)vaccinated (IV), the daily vaccination rate (VR) followed by the vaccination strategy,  the date on which schools were unlocked (UnlockSchoolsOn), and a random string with two uniform random numbers. The random string is the same for both files produced by a single run. Additionally, in the log of the Age-Stratified output file, the link to its associated "Total" file can be found.
+
+    Sample filenames for a single run:
+    Total_IR_30_IV_20_VR_0.2_Descending_UnlockSchoolsAt_0_0.0119600.795103-0.txt
+    AgeStratified_IR_30_IV_20_VR_0.2_Descending_UnlockSchoolsAt_0_0.0119600.795103-0.txt
+
+    Other information is used for the logs.
+
+    For reference: the array details[] = {locations_moved, hcw_recovered, hcw};
+  */
 
   errno = 0;      // Variable to store error number in case file open does not work
 
@@ -426,8 +468,21 @@ void writetofile(int output[][op_width], int age_output[][age_op_width], int tf,
       fprintf(fpt,"# Total Vaccines Given     : %d\n", vaccines_administered);
       fprintf(fpt,"# Schools unlocked on day  : %g\n", unlockSchoolsOn);
 
-      fprintf(fpt,"# Rate Array: \n");
-      for(int i=0; i<n_states;i++){fprintf(fpt,"# ");for(int j=0; j<n_states;j++){fprintf(fpt,"%5g ", rate[0][i][j]);}fprintf(fpt,"\n");} // NOTE! : Change to correct rates
+      fprintf(fpt,"# Disease parameters: \n");
+      fprintf(fpt,"# "); fprintf(fpt,"Age-Range "); for(int age=0;age<max_age;age++){fprintf(fpt,"   %2d    ", age*10);} fprintf(fpt,"\n");
+
+      fprintf(fpt,"# "); fprintf(fpt,"lambda_S  "); for(int age=0;age<max_age;age++){fprintf(fpt,"%5f ", lambda_S_array[age]);} fprintf(fpt,"\n");
+      fprintf(fpt,"# "); fprintf(fpt,"lambda_E  "); for(int age=0;age<max_age;age++){fprintf(fpt,"%5f ", lambda_E_array[age]);} fprintf(fpt,"\n");
+      fprintf(fpt,"# "); fprintf(fpt,"lambda_A  "); for(int age=0;age<max_age;age++){fprintf(fpt,"%5f ", lambda_A_array[age]);} fprintf(fpt,"\n");
+      fprintf(fpt,"# "); fprintf(fpt,"lambda_P  "); for(int age=0;age<max_age;age++){fprintf(fpt,"%5f ", lambda_P_array[age]);} fprintf(fpt,"\n");
+      fprintf(fpt,"# "); fprintf(fpt,"lambda_MI "); for(int age=0;age<max_age;age++){fprintf(fpt,"%5f ", lambda_MI_array[age]);}fprintf(fpt,"\n");
+      fprintf(fpt,"# "); fprintf(fpt,"lambda_SI "); for(int age=0;age<max_age;age++){fprintf(fpt,"%5f ", lambda_SI_array[age]);}fprintf(fpt,"\n");
+      fprintf(fpt,"# "); fprintf(fpt,"lambda_H  "); for(int age=0;age<max_age;age++){fprintf(fpt,"%5f ", lambda_H_array[age]);} fprintf(fpt,"\n");
+
+      fprintf(fpt,"# "); fprintf(fpt,"gamma     "); for(int age=0;age<max_age;age++){fprintf(fpt,"%5f ", gamma_array[age]);}fprintf(fpt,"\n");
+      fprintf(fpt,"# "); fprintf(fpt,"delta     "); for(int age=0;age<max_age;age++){fprintf(fpt,"%5f ", delta_array[age]);}fprintf(fpt,"\n");
+      fprintf(fpt,"# "); fprintf(fpt,"sigma     "); for(int age=0;age<max_age;age++){fprintf(fpt,"%5f ", sigma_array[age]);}fprintf(fpt,"\n");
+
       fprintf(fpt,"###### END LOG #####################\n");
       fprintf(fpt,"#\n");
       fprintf(fpt, "#%s %s %s %s %s %s %s %s %s %s %s %s\n","Day","nS","nE","nA","nP","nMI","nSI","nR","nH","nD","nV","nBS");
@@ -446,6 +501,7 @@ void writetofile(int output[][op_width], int age_output[][age_op_width], int tf,
   else{printf("File error, %d\n",errno);}
 
   errno = 0;      // Variable to store error number in case file open does not work
+
   char ageOutputFilename[1000];
 
   sprintf(ageOutputFilename,"./%s/AgeStratified_IR_%g_IV_%g_VR_%g_%s_UnlockSchoolsOn_%g_%lf%lf-%i.txt",output_folder,initial_recovered_fraction*100, initial_vaccinated_fraction*100, dvr,vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset",unlockSchoolsOn,rn1,rn2,iter);
@@ -457,16 +513,29 @@ void writetofile(int output[][op_width], int age_output[][age_op_width], int tf,
       fprintf(fpt1,"# Time taken               : %.2f s\n",time_taken);
       fprintf(fpt1,"# Main file                : %s \n",outputFilename);
 
-      fprintf(fpt1,"# Locations Moved in total : %d\n", details[7]);
-      fprintf(fpt1,"# Total recovered HCW      : %d\n", details[8]);
-      fprintf(fpt1,"# Total HCW                : %d\n", details[9]);
+      fprintf(fpt1,"# Locations Moved in total : %d\n", details[0]);
+      fprintf(fpt1,"# Total recovered HCW      : %d\n", details[1]);
+      fprintf(fpt1,"# Total HCW                : %d\n", details[2]);
 
       fprintf(fpt1,"# Vaccination strategy     : %s\n", vaccination_strategy==ascending ? "Ascending" : vaccination_strategy == descending ? "Descending" : "Unset");
       fprintf(fpt1,"# Total Vaccines Given     : %d\n", vaccines_administered);
       fprintf(fpt1,"# Schools unlocked on day  : %g\n", unlockSchoolsOn);
 
-      fprintf(fpt1,"# Rate Array: \n");
-      for(int i=0; i<n_states;i++){fprintf(fpt1,"# ");for(int j=0; j<n_states;j++){fprintf(fpt1,"%5g ", rate[0][i][j]);}fprintf(fpt1,"\n");} // NOTE! : Change to correct rates
+      fprintf(fpt1,"# Disease parameters: \n");
+      fprintf(fpt1,"# "); fprintf(fpt1,"Age-Range "); for(int age=0;age<max_age;age++){fprintf(fpt1,"   %2d    ", age*10);} fprintf(fpt1,"\n");
+
+      fprintf(fpt1,"# "); fprintf(fpt1,"lambda_S  "); for(int age=0;age<max_age;age++){fprintf(fpt1,"%5f ", lambda_S_array[age]);} fprintf(fpt1,"\n");
+      fprintf(fpt1,"# "); fprintf(fpt1,"lambda_E  "); for(int age=0;age<max_age;age++){fprintf(fpt1,"%5f ", lambda_E_array[age]);} fprintf(fpt1,"\n");
+      fprintf(fpt1,"# "); fprintf(fpt1,"lambda_A  "); for(int age=0;age<max_age;age++){fprintf(fpt1,"%5f ", lambda_A_array[age]);} fprintf(fpt1,"\n");
+      fprintf(fpt1,"# "); fprintf(fpt1,"lambda_P  "); for(int age=0;age<max_age;age++){fprintf(fpt1,"%5f ", lambda_P_array[age]);} fprintf(fpt1,"\n");
+      fprintf(fpt1,"# "); fprintf(fpt1,"lambda_MI "); for(int age=0;age<max_age;age++){fprintf(fpt1,"%5f ", lambda_MI_array[age]);}fprintf(fpt1,"\n");
+      fprintf(fpt1,"# "); fprintf(fpt1,"lambda_SI "); for(int age=0;age<max_age;age++){fprintf(fpt1,"%5f ", lambda_SI_array[age]);}fprintf(fpt1,"\n");
+      fprintf(fpt1,"# "); fprintf(fpt1,"lambda_H  "); for(int age=0;age<max_age;age++){fprintf(fpt1,"%5f ", lambda_H_array[age]);} fprintf(fpt1,"\n");
+
+      fprintf(fpt1,"# "); fprintf(fpt1,"gamma     "); for(int age=0;age<max_age;age++){fprintf(fpt1,"%5f ", gamma_array[age]);}fprintf(fpt1,"\n");
+      fprintf(fpt1,"# "); fprintf(fpt1,"delta     "); for(int age=0;age<max_age;age++){fprintf(fpt1,"%5f ", delta_array[age]);}fprintf(fpt1,"\n");
+      fprintf(fpt1,"# "); fprintf(fpt1,"sigma     "); for(int age=0;age<max_age;age++){fprintf(fpt1,"%5f ", sigma_array[age]);}fprintf(fpt1,"\n");
+
       fprintf(fpt1,"###### END LOG #####################\n");
       fprintf(fpt1,"#\n");
 
@@ -493,9 +562,9 @@ void writetofile(int output[][op_width], int age_output[][age_op_width], int tf,
   }
   else{printf("File error, %d\n",errno);}
 
-}
+} // End of writetofile function
 
-// do one run of the epidemic for tf days
+// Perform one run of the epidemic for tf days
 void run(int tf, double start_vacc, double dvr, double unlockSchoolsOn, int iter){
 
   clock_t start, end;                                     // Measuring how long the function takes to run
@@ -626,8 +695,8 @@ void run(int tf, double start_vacc, double dvr, double unlockSchoolsOn, int iter
       else{printf("Error, all three moves are done, but movement is still occurring.\n");}
 
     }
-	  
-    // now loop over all people in all rooms and update their infection state if needed
+
+    // Now loop over all people in all rooms and update their infection state if needed
     for(int i=0; i<n_loc; i++){
 
       for(int room=0; room<n_rooms[i];room++){
@@ -665,7 +734,7 @@ void run(int tf, double start_vacc, double dvr, double unlockSchoolsOn, int iter
 
           int age = pop[ind[j]][a];
 
-          double new_gamma = rate[age][E][A]/(rate[age][E][A]+rate[age][E][P]);    // Default vals: If the person isn't a vaccinated subject, f is just gamma
+          double new_gamma = rate[age][E][A]/(rate[age][E][A]+rate[age][E][P]);    // Default vals: If the person isn't a vaccinated subject, new_gamma is just gamma
           double lambda_E = rate[age][E][A]+rate[age][E][P];
           double beta_multiplier = 1.0;                                            // Default beta-multiplier (reduction) = 1 unless vaccinated
 
@@ -995,47 +1064,13 @@ void run(int tf, double start_vacc, double dvr, double unlockSchoolsOn, int iter
   writetofile(output, age_output, tf, cpu_time_used, details, iter);
 
 
-}// End of run function.
+} // End of run function.
 
 
 
 int main() {
 
-  char filename[1000]="synthetic_population.csv";
-
-  /************ PARAMETERS ************/
-
-  double lambda_S = 0.7;
-  double lambda_E = 1/4.5;
-  double lambda_A = 1.0/8;
-  double lambda_P = 1/1.1;
-  double lambda_MI = 1.0/8;
-  double lambda_SI = 1/1.5;
-  double lambda_H  = 1/18.1;
-
-
-  /************* AGE FACTOR *************/
-
-  double lambda_S_array[] = {1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S, 1.0*lambda_S};
-
-  double gamma_array[] = {1-0.5, 1-0.55,1- 0.6, 1-0.65,1-0.7, 1-0.75,1-0.8, 1-0.85,1- 0.9, 1-0.9};
-
-  double delta_array[] = {1-0.0005,  1-0.00165,  1-0.00720,  1-0.02080,  1-0.03430,  1-0.07650,  1-0.13280,  1-0.20655,  1-0.24570,  1-0.24570};
-
-  double sigma_array[] = {0.00002, 0.00002, 0.0001, 0.00032, 0.00098, 0.00265, 0.00766, 0.02439, 0.08292, 0.16190};
-
-
-  double lambda_E_array[]  = {lambda_E , lambda_E  , lambda_E , lambda_E ,  lambda_E  , lambda_E  , lambda_E, lambda_E  , lambda_E  , lambda_E};
-  double lambda_A_array[]  = {lambda_A , lambda_A  , lambda_A , lambda_A ,  lambda_A  , lambda_A  , lambda_A, lambda_A  , lambda_A  , lambda_A};
-  double lambda_P_array[]  = {lambda_P , lambda_P  , lambda_P , lambda_P ,  lambda_P  , lambda_P  , lambda_P, lambda_P  , lambda_P  , lambda_P};
-
-  double lambda_MI_array[] = {lambda_MI, lambda_MI , lambda_MI , lambda_MI  , lambda_MI , lambda_MI , lambda_MI , lambda_MI , lambda_MI , lambda_MI};
-  double lambda_SI_array[] = {lambda_SI, lambda_SI , lambda_SI , lambda_SI  , lambda_SI , lambda_SI , lambda_SI , lambda_SI , lambda_SI , lambda_SI};
-
-  double lambda_H_array[]  = {lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H , lambda_H};
-
-
-  /************* RATE ARRAY *************/
+  /**************************** RATE ARRAY ****************************/
 
   for(int i=0;i<max_age;i++){
     rate[i][S][E] = lambda_S_array[i];                       // S -> E
@@ -1052,11 +1087,6 @@ int main() {
   }
 
 
-  /******* SIMULATION PARAMETERS *******/
-
-  int tf = 200;                            // Total simulation run time in days
-
-
   //********************* Monte Carlo run with the above specifications *********************//
 
   int mc_runs = 1;
@@ -1066,6 +1096,9 @@ int main() {
 
   double irf[] = {30.0/100.0, 50.0/100.0};
   int n_irf    = sizeof(irf)/sizeof(irf[0]);
+
+  // Each run of the following loop creates two separate output file with unique names,
+  // with age-stratified and aggregate daywise data, as detailed in the writetofile function
 
   for(int i=0;i<mc_runs;i++){
     dvr = 0.2;                                      // Daily vaccination rate (in percentage of total population per day)
@@ -1079,8 +1112,8 @@ int main() {
 
         int start_vacc = 0.0;                       // Start vaccination immediately
 
-        createPopulation(filename);                 // Create a random population with a fixed infection seed (default: 1%) and recovered fraction (default: 30%), set by initial_asymptomatic_fraction
-                                                    // Resets the pop array, n_per_location array, and people_linked_to array.
+        createPopulation(input_filename);           // Create a population from "input_filename" with a fixed infection seed (default: 1%) and recovered fraction (default: 30%), set by initial_asymptomatic_fraction
+                                                    // Also resets the pop array, n_per_location array, and people_linked_to array.
 
         run(tf,
             start_vacc,
@@ -1092,4 +1125,4 @@ int main() {
 
   }
 
- }
+} // End of main function
