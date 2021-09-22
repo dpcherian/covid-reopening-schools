@@ -84,14 +84,14 @@ double dt = 0.1;
 char output_folder[100] = "tmp";
 bool print_log = true;
 
-const int mult = 1;              // Multiplier to scale up problem (1: n_pop = 1 x 10,000, 2: n_pop = 20,000, etc.)
+const int mult = 1;              // Multiplier to scale up problem
 
 const int n_pop = mult*20316;    // Total population
 const int n_loc = mult*6623;     // Total number of locations
 const int n_net = mult*123;      // Total number of networks
 const int n_hospitals = mult*1;  // Set the number of hospitals.
 
-const int start_schools = n_hospitals; // Where school locations start
+const int start_schools = n_hospitals; // Where school locations start (DON'T change this!)
 const int n_schools = mult*1;          // Set the number of schools (1)
 
 const int classrooms = 100;            // Number of classrooms per school
@@ -106,16 +106,16 @@ double Cpars[] = {1,  1,   1,    1,   0.1}; // Contact parameters for transmissi
 
 /* Vaccination parameters ********************/
 
-double dvr = 0.0;
+double dvr = 0.0; // Daily Vaccination Rate (units: percentage of total population per day)
 double infection_reduction       = 1.0 - 0.441;
 double gamma_fractional_increase = 1.0 - 0.598;
 double transmission_reduction    = 0.4;
 
-int vaccination_strategy = 0;  // Can be 0 (unset), ascending (1), or descending (-1)
+int vaccination_strategy = 0;  // Can be 0 (unset), ascending by age (1), or descending by age (-1)
 
 /* School parameters *************************/
 
-double unlockSchoolsOn = 100;
+double unlockSchoolsOn = 100;	// units: days
 bool start_with_schools_locked = true;          // Don't allow people to go to schools. Default: true (start schools locked)
 bool shuffle_teachers = false;                  // Allow teachers move between classrooms. Default: false (don't let them move)
 
@@ -141,7 +141,7 @@ const int D = 8;
 const int RAT = 0;
 const int PCR = 1;
 
-const int person_attr = 6;  // Number of attributes a person can be assigned in the pop array (state, age, "something", home location, work location, currently location)
+const int person_attr = 6;  // Number of attributes a person can be assigned in the pop array (state, age, "something", home location, work location, current location)
 
 const int s = 0;   // Index of "state" attribute
 
@@ -208,7 +208,7 @@ int agewise_vaccines_administered[max_age] = {};
 /************************************************/
 
 
-void readcsv(char *filename)
+void readcsv(char *filename) // read in the synthetic population from csv file
 {
 int num_to_prevaccinate = (int)(initial_vaccinated_fraction*n_pop);
 
@@ -495,7 +495,7 @@ void writetofile(int output[][op_width], int age_output[][age_op_width], int tf,
 
 }
 
-
+// do one run of the epidemic for tf days
 void run(int tf, double start_vacc, double dvr, double unlockSchoolsOn, int iter){
 
   clock_t start, end;                                     // Measuring how long the function takes to run
@@ -626,7 +626,8 @@ void run(int tf, double start_vacc, double dvr, double unlockSchoolsOn, int iter
       else{printf("Error, all three moves are done, but movement is still occurring.\n");}
 
     }
-
+	  
+    // now loop over all people in all rooms and update their infection state if needed
     for(int i=0; i<n_loc; i++){
 
       for(int room=0; room<n_rooms[i];room++){
@@ -722,7 +723,7 @@ void run(int tf, double start_vacc, double dvr, double unlockSchoolsOn, int iter
           }
 
           int from = pop[ind[j]][s];
-          if(uniform()<exit_rate[from]*dt){                             // If the person is selected to move
+          if(uniform()<exit_rate[from]*dt){                             // If the person is selected to change infection state
             double p = uniform();
             double temp=0;
 
@@ -1067,7 +1068,7 @@ int main() {
   int n_irf    = sizeof(irf)/sizeof(irf[0]);
 
   for(int i=0;i<mc_runs;i++){
-    dvr = 0.2;                                      // Daily vaccination rate (in percentage)
+    dvr = 0.2;                                      // Daily vaccination rate (in percentage of total population per day)
     vaccination_strategy=descending;                // First vaccinate 40+ for a month, then 20+
 
     for(int r=0;r<n_irf;r++){
